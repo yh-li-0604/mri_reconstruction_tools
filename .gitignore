@@ -1,0 +1,13 @@
+*.m
+*.m~
+*.png
+
+/.ipynb_checkpoints
+/.vscode
+/cache
+/matlab_code
+/results
+/tests
+/ToolsForRecon
+
+**/__pycache__
