@@ -51,7 +51,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj_Args:
 
     def __post_init__(self):
         self.slice_num = round(self.twixobj.hdr.Meas.lImagesPerSlab*(1+self.twixobj.hdr.Meas.dSliceOversamplingForDialog))
-        self.kspace_centre_partition_num = self.mdh.ushKSpaceCentrePartitionNo
+        self.kspace_centre_partition_num = int(self.mdh.ushKSpaceCentrePartitionNo[0]-1) # important! -1 because of nav
 
         self.ch_num = self.shape_dict['ch_num']
         self.partition_num = self.shape_dict['partition_num']
@@ -69,7 +69,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj_Args:
         self.FOV = self.twixobj.hdr.Meas.RoFOV# type: ignore
         
         # TODO what this means???
-        # self.start_idx = max(max(self.phase_num, 10), self.phase_num*np.ceil(10/self.phase_num))
+        self.start_idx = max(max(self.phase_num, 10), self.phase_num*np.ceil(10/self.phase_num))
 
         nSpokesToWorkWith = np.floor(self.duration_to_reconstruct/self.T)
         # per contrast from injection time. (Jan )
@@ -82,7 +82,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj_Args:
         self.contra_num = int(np.floor(nSpokesToWorkWith/self.spokes_per_contra))
         self.spokes_per_phase = int(nSpokesPerContrast/self.phase_num)
 
-        self.grid_size = (int(1.5*self.spoke_len), int(1.5*self.spoke_len))
+        self.grid_size = (int(3*self.spoke_len), int(3*self.spoke_len))
         # self.im_size = (self.spoke_len//2, self.spoke_len//2)
         self.im_size = (self.spoke_len, self.spoke_len)
 
@@ -253,7 +253,7 @@ def nufft_CAPTURE_VarW_NQM_DCE_PostInj(args: CAPTURE_VarW_NQM_DCE_PostInj_Args, 
         kspace_data_centralized, kspace_traj, adjnufft_ob, batch_size=2, device=torch.device('cpu'))
 
     img = torch.zeros((args.contra_num, args.phase_num, args.last_slice -
-                      args.first_slice, args.im_size[0], args.im_size[1]), dtype=torch.complex128)
+                      args.first_slice, args.im_size[0], args.im_size[1]), dtype=torch.complex64)
     for t, ph in product(range(args.contra_num), range(args.phase_num)):
         print('NUFFT for contrast:{}, phase:{}'.format(t, ph))
         sensitivity_map = cse[t, ph][:, args.first_slice:args.last_slice]

@@ -82,7 +82,7 @@ def cihat_pipe_density_compensation(ktraj, im_size, grid_size, device=torch.devi
 
     # print(w.shape,omega.shape,im_size)    
     w = w / pipe(
-        torch.ones((1,1)+im_size,dtype=torch.complex128,device=device),
+        torch.ones((1,1)+im_size,dtype=torch.complex64,device=device),
         curry(nufft_ob.forward)(omega=omega),
         curry(torch.mul)(other=w),
         curry(adjnufft_ob.forward)(omega=omega),

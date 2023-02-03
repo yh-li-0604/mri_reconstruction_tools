@@ -121,9 +121,9 @@ def read_navigator_kspace_data(datFileLocation, scan_meta_date_list, shape_dict)
 
     # TODO should be numOfLine be at the location of numofPE, check with Cihat this parameter
     # BUG should be out of while loop, we need to read the meta data first
-    nav = np.zeros((spoke_len, spoke_num, ch_num), dtype=np.complex128)
+    nav = np.zeros((spoke_len, spoke_num, ch_num), dtype=np.complex64)
     kSpaceData = np.zeros((spoke_len, spoke_num, partition_num,
-                          ch_num, echo_num), dtype=np.complex128)
+                          ch_num, echo_num), dtype=np.complex64)
     # now reread to load actual data
     for scan_dict in tqdm(scan_meta_date_list):
         line = scan_dict['line']  # 3000
