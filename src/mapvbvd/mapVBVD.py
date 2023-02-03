@@ -409,6 +409,7 @@ def mapVBVD(filename, quiet=False, **kwargs):
         isCurrScan = mask.MDH_IMASCAN.astype(bool)
         if isCurrScan.any():
             currTwixObj.image.readMDH(mdh, filePos, isCurrScan)
+            mdh_return = mdh
         else:
             currTwixObj.pop('image', None)
 
@@ -536,7 +537,7 @@ def mapVBVD(filename, quiet=False, **kwargs):
     if len(twix_obj) == 1:
         twix_obj = twix_obj[0]
     # breakpoint()
-    return twix_obj
+    return twix_obj, mdh_return
 
 
 # Add some class methods to AttrDict so that we get around the issue of not being able to

@@ -230,6 +230,7 @@ def parse_xprot(buffer):
 
 
 def parse_buffer(buffer):
+    print(buffer)
     reASCCONV = re.compile(
         r'### ASCCONV BEGIN[^\n]*\n(.*)\s### ASCCONV END ###', re.DOTALL)
     # print(f'buffer = {buffer[0:10]}')
