@@ -24,7 +24,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj_Args:
     slice_num: int=field(init=False)
     ch_num: int=field(init=False)
     kspace_centre_partition_num: int =field(init=False)
-    start_idx: int=field(init=False)
+    start_spokes_to_discard: int=field(init=False)
     spoke_num: int=field(init=False)
     spoke_len: int=field(init=False)
     contra_num: int=field(init=False)
@@ -51,10 +51,11 @@ class CAPTURE_VarW_NQM_DCE_PostInj_Args:
 
     def __post_init__(self):
         self.slice_num = round(self.twixobj.hdr.Meas.lImagesPerSlab*(1+self.twixobj.hdr.Meas.dSliceOversamplingForDialog))
-        self.kspace_centre_partition_num = int(self.mdh.ushKSpaceCentrePartitionNo[0]-1) # important! -1 because of nav
+        self.kspace_centre_partition_num = int(self.mdh.ushKSpaceCentrePartitionNo[0]) # important! -1 because of nav
 
         self.ch_num = self.shape_dict['ch_num']
-        self.partition_num = self.shape_dict['partition_num']
+        self.total_partition_num = self.shape_dict['partition_num']
+        self.partition_num = self.total_partition_num-1 # this number does not contain navigator
         self.spoke_num = self.shape_dict['spoke_num']
         self.spoke_len = self.shape_dict['spoke_len']
         
@@ -64,12 +65,12 @@ class CAPTURE_VarW_NQM_DCE_PostInj_Args:
         
 
         self.TR = self.twixobj.hdr.MeasYaps[('alTR', '0')]/1000
-        self.T = self.TR*self.partition_num*1e-3+18.86e-3  # 19e-3 is for Q-fat sat
+        self.T = self.TR*self.total_partition_num*1e-3+18.86e-3  # 19e-3 is for Q-fat sat
         self.Fs = 1/self.T
         self.FOV = self.twixobj.hdr.Meas.RoFOV# type: ignore
         
         # TODO what this means???
-        self.start_idx = max(max(self.phase_num, 10), self.phase_num*np.ceil(10/self.phase_num))
+        self.start_spokes_to_discard = max(max(self.phase_num, 10), self.phase_num*np.ceil(10/self.phase_num))
 
         nSpokesToWorkWith = np.floor(self.duration_to_reconstruct/self.T)
         # per contrast from injection time. (Jan )
@@ -82,9 +83,9 @@ class CAPTURE_VarW_NQM_DCE_PostInj_Args:
         self.contra_num = int(np.floor(nSpokesToWorkWith/self.spokes_per_contra))
         self.spokes_per_phase = int(nSpokesPerContrast/self.phase_num)
 
-        self.grid_size = (int(3*self.spoke_len), int(3*self.spoke_len))
         # self.im_size = (self.spoke_len//2, self.spoke_len//2)
         self.im_size = (self.spoke_len, self.spoke_len)
+        self.grid_size = (int(2*self.spoke_len), int(2*self.spoke_len))
 
         
 

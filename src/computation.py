@@ -31,11 +31,11 @@ def batch_process(batch_size:int, device:torch.device, batch_dim = 0):
     return Inner
 
 def hamming_filter(nonzero_width_percent:float, width:int)->np.ndarray:
-    nonzero_width = int(width*nonzero_width_percent) 
-    pad_width_L = int((width-nonzero_width)//2 )
-    pad_width_R = int(width-nonzero_width-pad_width_L)
-    hamming_weights = np.hamming(nonzero_width)
-    W = np.pad(hamming_weights,pad_width=(pad_width_L,pad_width_R)) 
+    nonzero_width = round(width*nonzero_width_percent) 
+    pad_width_L = round((width-nonzero_width)//2 )
+    pad_width_R = width-nonzero_width-pad_width_L
+    hamming_weights = np.float32(np.hamming(nonzero_width))
+    W = np.pad(hamming_weights,pad_width=(pad_width_L,pad_width_R))
     return W
 
 def tuned_and_robust_estimation(navigator: np.ndarray, percentW: float, Fs, FOV, ndata, device = torch.device('cuda')):
@@ -101,19 +101,21 @@ def tuned_and_robust_estimation(navigator: np.ndarray, percentW: float, Fs, FOV,
 
     return i_max, m_max, torch.from_numpy(r_max_filtered)
 
-def centralize_kspace(kspace_data, acquire_length, center_in_acquire_lenth, full_length, dim)->torch.Tensor:
-    diff_kdata = int(full_length // 2  - (center_in_acquire_lenth+1)) 
-    #here center_in_acquire_length is index, here +1 to turn into quantity
+def centralize_kspace(kspace_data, acquire_length, center_idx_in_acquire_lenth, full_length, dim)->torch.Tensor:
+    # center_in_acquire_length is index, here +1 to turn into quantity
+    # print(kspace_data[0,:,0,320])
+    front_padding = round(full_length / 2 - (center_idx_in_acquire_lenth+1))
+    # the dc point can be located at length/2 or length/2+1, when length is even, cihat use length/2+1
+    front_padding += 1
     pad_length = [ 0 for i in range(2*len(kspace_data.shape))]
-    # pad_length[dim*2], pad_length[dim*2+1] = diff_kdata, full_length-acquire_length-diff_kdata+1
-    pad_length[dim*2], pad_length[dim*2+1] = diff_kdata, full_length-acquire_length-diff_kdata
+    pad_length[dim*2+1], pad_length[dim*2] = front_padding, full_length-acquire_length-front_padding
     pad_length.reverse()
     # torch.nn.functional.pad() are using pad_lenth in a inverse way. (pad_front for axis -1,pad_back for axis -1, pad_front for axis -2, pad_back for axis-2 ......)
+    # print(pad_length)
     kspace_data_ = F.pad(kspace_data, pad_length, mode='constant') # default constant is 0
-    # kspace_data_ = torch.zeros(int(ndata), ntviews-max(nPhases,10), nslc_f, ch_num, dtype=torch.complex128)
-    print(kspace_data_.shape)
-    print(kspace_data.shape)
-    print(full_length,acquire_length)
+    # print(kspace_data_.shape)
+    # print(kspace_data.shape)
+    # print(full_length,acquire_length)
     return kspace_data_
 
 def ifft_1D(kspace_data,dim = -1):
@@ -121,14 +123,23 @@ def ifft_1D(kspace_data,dim = -1):
 
 def generate_golden_angle_radial_spokes_kspace_trajctory(spokes_num, spoke_length):
     # create a k-space trajectory
-    ga = torch.tensor(np.deg2rad(180 / ((1 + np.sqrt(5)) / 2)))
-    kx = torch.zeros(spokes_num, spoke_length)
-    ky = torch.zeros_like(kx)
-    ky[0, :] = torch.linspace(-torch.pi, torch.pi, spoke_length)
-    for i in range(1, spokes_num):
-        kx[i, :] = torch.cos(ga) * kx[i - 1, :] - torch.sin(ga) * ky[i - 1, : ]
-        ky[i, :] = torch.sin(ga) * kx[ i - 1,:] + torch.cos(ga) * ky[ i - 1, :]
-    ktraj = torch.stack((ky, kx), dim=0)
+    KWIC_GOLDENANGLE = 111.246117975
+    k = torch.linspace(-0.5, 0.5-1/spoke_length,spoke_length)
+    k[spoke_length//2] = 0
+    A = torch.arange(spokes_num)*torch.pi*KWIC_GOLDENANGLE/180
+    kx = torch.outer(torch.cos(A),k)
+    ky = torch.outer(torch.sin(A),k)
+    ktraj = torch.stack((kx, ky), dim=0)
+
+    # ga = torch.tensor(np.deg2rad(180 / ((1 + np.sqrt(5)) / 2)))
+    # kx = torch.zeros(spokes_num, spoke_length)
+    # ky = torch.zeros_like(kx)
+    # ky[0, :] = torch.linspace(-torch.pi, torch.pi, spoke_length)
+    # ky[0,spoke_length//2]=0
+    # for i in range(1, spokes_num):
+    #     kx[i, :] = torch.cos(ga) * kx[i - 1, :] - torch.sin(ga) * ky[i - 1, :]
+    #     ky[i, :] = torch.sin(ga) * kx[i - 1, :] + torch.cos(ga) * ky[i - 1, :]
+    # ktraj = torch.stack((ky, kx), dim=0)
     return ktraj
 
 def data_binning(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num, spokes_per_phase):
@@ -156,29 +167,27 @@ def data_binning(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num,
         spoke = spokes_per_phase)
     return output
 
-
-def recon_adjnufft(kspace_data, smaps, kspace_traj, adjnufft_ob, density_compensation_func):
+def recon_adjnufft(kspace_data, kspace_traj, adjnufft_ob, density_compensation_func):
+# def recon_adjnufft(kspace_data, smaps, kspace_traj, adjnufft_ob, density_compensation_func):
     # print(kspace_traj.shape,kspace_data.shape,smaps.shape)
     # print(kspace_data.shape)
+    kspace_density_compensation = density_compensation_func(
+            kspace_traj=kspace_traj,
+            im_size=adjnufft_ob.im_size.numpy(force=True),
+            grid_size=adjnufft_ob.grid_size.numpy(force=True))
     kspace_data = eo.rearrange(
-        kspace_data,
+        kspace_data*kspace_density_compensation,
         '... ch slice spoke spoke_len-> ... slice ch (spoke spoke_len)')
     kspace_traj = eo.rearrange(
         kspace_traj,
         '... c spoke spoke_len -> ... c (spoke spoke_len)') # c stands for complex channel
-    smaps = eo.rearrange(
-        smaps,
-        '... ch slice h w-> ... slice ch h w')  
-    # print(kspace_data.shape,kspace_traj.shape,smaps.shape)
-    # k_space_density_compensation, it is flattened due to nufft, now recover it
-    kspace_density_compensation = density_compensation_func(
-            ktraj=kspace_traj,
-            im_size=adjnufft_ob.im_size.numpy(force=True),
-            grid_size=adjnufft_ob.grid_size.numpy(force=True))
-    # print(kspace_density_compensation.shape)
-    # img = adjnufft_ob.forward((kspace_data*kspace_density_compensation).contiguous(), kspace_traj, smaps=smaps)
-    # print(kspace_data.shape,kspace_density_compensation.shape,kspace_traj.shape,smaps.shape)
-    img = adjnufft_ob.forward((kspace_data*kspace_density_compensation).contiguous(), kspace_traj, smaps=smaps)
+    # interp_mats = tkbn.calc_tensor_spmatrix(
+    #     kspace_traj,
+    #     im_size=adjnufft_ob.im_size.numpy(force=True)
+    # )
+
+    img = adjnufft_ob.forward((kspace_data).contiguous(), kspace_traj,norm='ortho')
+
     img = eo.rearrange(img,'slice ch h w-> ch slice h w')
     return img
 
@@ -220,7 +229,7 @@ def polygon_area(vertices):
 
     # @batch_process(batch_size = 8, device = device)
 
-    # img = torch.zeros((contrast_num,phase_num,last_slice-first_slice,im_size[0],im_size[1]),dtype=torch.complex128)
+    # img = torch.zeros((contrast_num,phase_num,last_slice-first_slice,im_size[0],im_size[1]),dtype=torch.complex64)
 
     # for t,ph in product(range(contrast_num),range(phase_num)):
     #     print('NUFFT for contrast:{}, phase:{}'.format(t, ph))
@@ -260,7 +269,7 @@ def polygon_area(vertices):
     #     # img_dc = eo.rearrange(img_dc,'slice ch h w-> ch slice h w')
     #     return img_dc
 
-    # img_nufft = torch.zeros((args.contra_num,args.phase_num,args.last_slice-args.first_slice,args.im_size[0],args.im_size[1]),dtype=torch.complex128)
+    # img_nufft = torch.zeros((args.contra_num,args.phase_num,args.last_slice-args.first_slice,args.im_size[0],args.im_size[1]),dtype=torch.complex64)
 
     # for t,ph in product(range(args.contra_num),range(args.phase_num)):
     #     print('NUFFT for contrast:{}, phase:{}'.format(t, ph))

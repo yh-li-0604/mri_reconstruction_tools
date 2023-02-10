@@ -18,10 +18,11 @@ def lowk_xy(kspace_data, kspace_traj, adjnufft_ob, hamming_filter_ratio=0.05, ba
         kspace_data = comp.ifft_1D(kspace_data, dim=1)
         # TODO why we need flip?
         kspace_data = torch.flip(kspace_data, dims=(1,))
-        # kspace_data = kspace_data/kspace_data.abs().max()
+        kspace_data = kspace_data/kspace_data.abs().max()
         kspace_data = eo.rearrange(
             kspace_data, 'ch_num slice_num spoke_num spoke_len -> slice_num ch_num (spoke_num spoke_len)').contiguous()
-        img_dc = adjnufft_ob.forward(kspace_data, ktraj)
+        # interp_mats = tkbn.calc_tensor_spmatrix(ktraj,im_size=adjnufft_ob.im_size.numpy(force=True))
+        img_dc = adjnufft_ob.forward(kspace_data, ktraj,norm='ortho')
         img_dc = eo.rearrange(
             img_dc, 'slice_num ch_num h w -> ch_num slice_num h w')
         # print(img_dc.shape)
@@ -31,9 +32,16 @@ def lowk_xy(kspace_data, kspace_traj, adjnufft_ob, hamming_filter_ratio=0.05, ba
         kspace_data,
         filter=spoke_lowpass_filter_xy,
         ktraj=eo.rearrange(kspace_traj, 'c spoke_num spoke_len -> c (spoke_num spoke_len)'),)
-    img_sens_SOS = torch.sqrt(eo.reduce(coil_sens.abs(
-        )**2, 'ch_num slice_num height width -> () slice_num height width', 'sum'))
+    
+    coil_sens = coil_sens[:,:,spoke_len//2-spoke_len//4:spoke_len//2+spoke_len//4,spoke_len//2-spoke_len//4:spoke_len//2+spoke_len//4]
+    # coil_sens = torch.from_numpy(coil_sens)
+    img_sens_SOS = torch.sqrt(
+        eo.reduce(
+            coil_sens.abs()**2, 
+            'ch_num slice_num height width -> () slice_num height width', 'sum'))
     coil_sens = coil_sens/img_sens_SOS
+    coil_sens[torch.isnan(coil_sens)] = 0 # optional
+    coil_sens /= coil_sens.abs().max()
     return coil_sens 
 
 
@@ -53,7 +61,7 @@ def lowk_xyz(kspace_data, kspace_traj,  adjnufft_ob, hamming_filter_ratio=[0.05,
         kspace_data = comp.ifft_1D(kspace_data, dim=1)
         # TODO why we need flip?
         kspace_data = torch.flip(kspace_data, dims=(1,))
-        # kspace_data = kspace_data/kspace_data.abs().max()
+        kspace_data = kspace_data/kspace_data.abs().max()
         kspace_data = eo.rearrange(
             kspace_data, 'ch_num slice_num spoke_num spoke_len -> slice_num ch_num (spoke_num spoke_len)').contiguous()
         img_dc = adjnufft_ob.forward(kspace_data, ktraj)
@@ -65,9 +73,12 @@ def lowk_xyz(kspace_data, kspace_traj,  adjnufft_ob, hamming_filter_ratio=[0.05,
         kspace_data,
         filter_xy=spoke_lowpass_filter_xy, filter_z=spoke_lowpass_filter_z,
         ktraj=eo.rearrange(kspace_traj, 'c spoke_num spoke_len -> c (spoke_num spoke_len)'),)
+    coil_sens = coil_sens[:,:,spoke_len//2-spoke_len//4:spoke_len//2+spoke_len//4,spoke_len//2-spoke_len//4:spoke_len//2+spoke_len//4]
     img_sens_SOS = torch.sqrt(eo.reduce(coil_sens.abs(
     )**2, 'ch_num slice_num height width -> () slice_num height width', 'sum'))
     coil_sens = coil_sens/img_sens_SOS
+    coil_sens[torch.isnan(coil_sens)] = 0 # optional
+    coil_sens /= coil_sens.abs().max()
     return coil_sens
 
 
@@ -129,9 +140,7 @@ class Lowk_5D_CSE(CoilSensitivityEstimator):
         current_phase = key[1]
         kspace_traj = self.kspace_traj[current_contrast, current_phase]
         kspace_density_compensation = self.density_compensation_func(
-            ktraj=eo.rearrange(
-                kspace_traj,
-                '... c spoke spoke_len -> ... c (spoke spoke_len)'),
+            kspace_traj=kspace_traj,
             im_size=self.op.im_size.numpy(force=True),
             grid_size=self.op.grid_size.numpy(force=True))
         return lowk_xyz(self.kspace_data[
