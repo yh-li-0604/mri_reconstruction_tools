@@ -85,7 +85,6 @@ def tuned_and_robust_estimation(navigator: np.ndarray, percentW: float, Fs, FOV,
     i_max, m_max = np.unravel_index(np.argmax(Q_np), Q_np.shape)
     # projection_max = projections[:, :, i_max]
     r_max = r[:, i_max, m_max].numpy(force=True)
-    # print(type( r_max ))
     
     # new quality metric block end
 
@@ -111,11 +110,7 @@ def centralize_kspace(kspace_data, acquire_length, center_idx_in_acquire_lenth, 
     pad_length[dim*2+1], pad_length[dim*2] = front_padding, full_length-acquire_length-front_padding
     pad_length.reverse()
     # torch.nn.functional.pad() are using pad_lenth in a inverse way. (pad_front for axis -1,pad_back for axis -1, pad_front for axis -2, pad_back for axis-2 ......)
-    # print(pad_length)
     kspace_data_ = F.pad(kspace_data, pad_length, mode='constant') # default constant is 0
-    # print(kspace_data_.shape)
-    # print(kspace_data.shape)
-    # print(full_length,acquire_length)
     return kspace_data_
 
 def ifft_1D(kspace_data,dim = -1):
@@ -123,24 +118,16 @@ def ifft_1D(kspace_data,dim = -1):
 
 def generate_golden_angle_radial_spokes_kspace_trajctory(spokes_num, spoke_length):
     # create a k-space trajectory
-    KWIC_GOLDENANGLE = 111.246117975
+    KWIC_GOLDENANGLE = 180*(np.sqrt(5)-1)/2#111.246117975
     k = torch.linspace(-0.5, 0.5-1/spoke_length,spoke_length)
     k[spoke_length//2] = 0
     A = torch.arange(spokes_num)*torch.pi*KWIC_GOLDENANGLE/180
     kx = torch.outer(torch.cos(A),k)
     ky = torch.outer(torch.sin(A),k)
     ktraj = torch.stack((kx, ky), dim=0)
-
-    # ga = torch.tensor(np.deg2rad(180 / ((1 + np.sqrt(5)) / 2)))
-    # kx = torch.zeros(spokes_num, spoke_length)
-    # ky = torch.zeros_like(kx)
-    # ky[0, :] = torch.linspace(-torch.pi, torch.pi, spoke_length)
-    # ky[0,spoke_length//2]=0
-    # for i in range(1, spokes_num):
-    #     kx[i, :] = torch.cos(ga) * kx[i - 1, :] - torch.sin(ga) * ky[i - 1, :]
-    #     ky[i, :] = torch.sin(ga) * kx[i - 1, :] + torch.cos(ga) * ky[i - 1, :]
-    # ktraj = torch.stack((ky, kx), dim=0)
     return ktraj
+
+
 
 def data_binning(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num, spokes_per_phase):
     spoke_len = data.shape[-1]
@@ -168,9 +155,6 @@ def data_binning(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num,
     return output
 
 def recon_adjnufft(kspace_data, kspace_traj, adjnufft_ob, density_compensation_func):
-# def recon_adjnufft(kspace_data, smaps, kspace_traj, adjnufft_ob, density_compensation_func):
-    # print(kspace_traj.shape,kspace_data.shape,smaps.shape)
-    # print(kspace_data.shape)
     kspace_density_compensation = density_compensation_func(
             kspace_traj=kspace_traj,
             im_size=adjnufft_ob.im_size.numpy(force=True),
@@ -181,11 +165,6 @@ def recon_adjnufft(kspace_data, kspace_traj, adjnufft_ob, density_compensation_f
     kspace_traj = eo.rearrange(
         kspace_traj,
         '... c spoke spoke_len -> ... c (spoke spoke_len)') # c stands for complex channel
-    # interp_mats = tkbn.calc_tensor_spmatrix(
-    #     kspace_traj,
-    #     im_size=adjnufft_ob.im_size.numpy(force=True)
-    # )
-
     img = adjnufft_ob.forward((kspace_data).contiguous(), kspace_traj,norm='ortho')
 
     img = eo.rearrange(img,'slice ch h w-> ch slice h w')
@@ -200,124 +179,5 @@ def polygon_area(vertices):
     main_area = torch.dot(x[:-1], y[1:]) - torch.dot(y[:-1], x[1:])
     return 0.5*torch.abs(main_area + correction)
 
-
-# def MCNUFFT(kspace_data, 
-#     kspace_traj,
-#     adjnufft_ob,coil_sensitivity_estimator
-#     contrast_num,
-#     phase_num,
-#     slice_num,
-#     first_slice,
-#     last_slice,
-#     im_size,
-#     batch_size=80, 
-#     device = torch.device('cpu')):
-    '''
-    kspace_data shape: t ph ch slice spoke spoke_len
-    sensitivity_map shape: t ph ch slice h 
-    kspace_traj shape: t ph c spoke spoke_len
-    '''
-    # kspace_data = eo.rearrange(
-    #     kspace_data,
-    #     '... ch slice spoke spoke_len-> ... slice ch (spoke spoke_len)')
-    # kspace_traj = eo.rearrange(
-    #     kspace_traj,
-    #     '... c spoke spoke_len -> ... c (spoke spoke_len)') # c stands for complex channel
-    # smaps, ktraj, kspace_data,
-    # must change axis slice and ch outside, 
-    # because we can only batch operation on slice axis, not ch axis, later will lead to uncomplete sensitivity compensate.
-
-    # @batch_process(batch_size = 8, device = device)
-
-    # img = torch.zeros((contrast_num,phase_num,last_slice-first_slice,im_size[0],im_size[1]),dtype=torch.complex64)
-
-    # for t,ph in product(range(contrast_num),range(phase_num)):
-    #     print('NUFFT for contrast:{}, phase:{}'.format(t, ph))
-    #     sensitivity_map = csecoil_sensitivity_estimator[t,ph][:,args.first_slice:args.last_slice]
-    #     output = recon_adjnufft(
-    #             kspace_data[t,ph,args.first_slice:args.last_slice],
-    #             sensitivity_map[args.first_slice:args.last_slice],
-    #             kspace_traj = kspace_traj[t,ph],
-    #             adjnufft_ob=adjnufft_ob
-    #             )
-    #     img[t,ph,:,:,:] = eo.reduce(output, 'slice ch w h -> slice w h', 'sum')
-    # print('MCNUFFT reconstruction finished')
-    # img = (img-img.mean())/img.std()
-    # return img
-
-
-
-    # if args.coil_sensitivity_estimation_func_outside:
-    #     sensitivity_map = args.coil_sensitivity_estimation_func_outside(args_sens.kspace_data, adjnufft_ob, args_sens.ktraj,
-    #         batch_size=2, device=device)
-    #     sensitivity_map = eo.rearrange(
-    #             sensitivity_map,
-    #             '... ch slice h w-> ... slice ch h w')  
-    # kspace_data = eo.rearrange(
-    #     args.kspace_data,
-    #     '... ch slice spoke spoke_len-> ... slice ch (spoke spoke_len)')
-    # kspace_traj = eo.rearrange(
-    #     args.ktraj,
-    #     '... c spoke spoke_len -> ... c (spoke spoke_len)') # c stands for complex channel
-    # # smaps, ktraj, kspace_data,
-    # # must change axis slice and ch outside, 
-    # # because we can only batch operation on slice axis, not ch axis, later will lead to uncomplete sensitivity compensate.
-
-    # @batch_process(batch_size = batch_size, device=device)
-    # def recon_adjnufft(kspace_data, smaps, ktraj, adjnufft_ob):
-    #     img_dc = adjnufft_ob.forward(kspace_data.contiguous(), ktraj, smaps=smaps)
-    #     # img_dc = eo.rearrange(img_dc,'slice ch h w-> ch slice h w')
-    #     return img_dc
-
-    # img_nufft = torch.zeros((args.contra_num,args.phase_num,args.last_slice-args.first_slice,args.im_size[0],args.im_size[1]),dtype=torch.complex64)
-
-    # for t,ph in product(range(args.contra_num),range(args.phase_num)):
-    #     print('NUFFT for contrast:{}, phase:{}'.format(t, ph))
-    #     if args.coil_sensitivity_estimation_func_inside:
-    #         sensitivity_map = args.coil_sensitivity_estimation_func_inside(
-    #             args_sens.kspace_data[t,ph], adjnufft_ob, args_sens.ktraj[t,ph],
-    #             batch_size=80, device=device)
-    #         #TODO exemely slow, optimize this
-    #         sensitivity_map = eo.rearrange(
-    #             sensitivity_map,
-    #             '... ch slice h w-> ... slice ch h w')  
-    #     output = recon_adjnufft(
-    #             kspace_data[t,ph,args.first_slice:args.last_slice],
-    #             sensitivity_map[args.first_slice:args.last_slice],
-    #             ktraj = kspace_traj[t,ph],
-    #             adjnufft_ob=adjnufft_ob
-    #             )#[:,:,int(img_size[0]/4):3*int(img_size[0]/4),int(img_size[1]/4):3*int(img_size[1]/4)]
-    #     img_nufft[t,ph,:,:,:] = eo.reduce(output, 'slice ch w h -> slice w h', 'sum')
-    '''
-        for slice_idx in tqdm(range(slice_range[0],slice_range[1])):
-            if len(sensitivity_map.shape) == 4:
-                output = recon_adjnufft(
-                    eo.rearrange(
-                        kspace_density_compensation*kspace_data[slice_idx],
-                        'ch t ph spoke spoke_len-> (t ph) ch (spoke spoke_len)'
-                    ),
-                    eo.rearrange(kspace_traj,
-                    'c t ph spoke spoke_len -> (t ph) c (spoke spoke_len)'), # c stands for complex channel
-                    # k_space_density_compensation = k_space_density_compensation, 
-                    smaps=sensitivity_map[slice_idx],
-                    adjnufft_ob=adjnufft_ob
-                    )#[:,:,int(img_size[0]/4):3*int(img_size[0]/4),int(img_size[1]/4):3*int(img_size[1]/4)]
-            elif len(sensitivity_map.shape) == 6:
-                output = recon_adjnufft(
-                    eo.rearrange(
-                        kspace_density_compensation*kspace_data[slice_idx],
-                        'ch t ph spoke spoke_len-> (t ph) ch (spoke spoke_len)'
-                    ),
-                    eo.rearrange(kspace_traj,
-                    'c t ph spoke spoke_len -> (t ph) c (spoke spoke_len)'), # c stands for complex channel
-                    eo.rearrange(sensitivity_map,
-                    't ph slice_num ch_num h w-> (t ph) slice_num ch_num h w)')[:,slice_idx], # c stands for complex channel
-                    adjnufft_ob=adjnufft_ob
-                    )#[:,:,int(img_size[0]/4):3*int(img_size[0]/4),int(img_size[1]/4):3*int(img_size[1]/4)]
-    '''
-  
 def normalization(img):
     return (img-img.mean())/img.std()
-    # img_nufft = eo.rearrange(img_nufft, '(t ph) d w h -> t ph d w h', t = contrast_num, ph=phase_num)
-    # print('MCNUFFT reconstruction finished')
-    # return img_nufft

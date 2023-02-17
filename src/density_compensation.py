@@ -23,9 +23,9 @@ def voronoi_density_compensation(kspace_traj: torch.Tensor,
     kspace_traj_unique,  reverse_indices = np.unique( kspace_traj_complex.numpy(force=True), return_inverse=True, axis=0)
     kspace_traj_len = kspace_traj_unique.shape[0]
 
-    print(reverse_indices)
-    print(kspace_traj_unique[0:20])
-    print(kspace_traj_complex[:10])
+    # print(reverse_indices)
+    # print(kspace_traj_unique[0:20])
+    # print(kspace_traj_complex[:10])
     r = kspace_traj_complex.abs().max()  # spoke radius in kspace, should be 0.5
     kspace_traj_augmented = torch.cat(
             (torch.from_numpy(kspace_traj_unique).to(device), r*1.005*torch.exp(1j*2*torch.pi*torch.arange(1, 257, device=device)/256)))
@@ -55,28 +55,24 @@ def voronoi_density_compensation(kspace_traj: torch.Tensor,
     # plt.show()
 
 
-def pipe_density_compensation(kspace_traj, im_size, grid_size):
+def pipe_density_compensation(kspace_traj, im_size,*args, **wargs):
     spoke_shape = eo.parse_shape(kspace_traj, '_ spokes_num spoke_len')
     w = tkbn.calc_density_compensation_function(
         ktraj=eo.rearrange(
             kspace_traj, 'c spokes_num spoke_len -> c (spokes_num spoke_len)'),
-        im_size=im_size,
-        grid_size=grid_size)[0, 0]
+        im_size=im_size)[0, 0]
     return eo.rearrange(w,
                         ' (spokes_num spoke_len) -> spokes_num spoke_len ', **spoke_shape)
 
 
-def cihat_pipe_density_compensation(kspace_traj, im_size, grid_size, device=torch.device('cpu')):
+def cihat_pipe_density_compensation(kspace_traj, nufft_ob, adjnufft_ob, device=torch.device('cpu'),*args, **wargs):
+    im_size = adjnufft_ob.im_size.numpy(force=True)
+    grid_size = adjnufft_ob.grid_size.numpy(force=True)
     prev_device = kspace_traj.device
     spoke_shape = eo.parse_shape(kspace_traj, '_ spokes_num spoke_len')
     spoke_len = spoke_shape['spoke_len']
     omega = eo.rearrange(
         kspace_traj, 'c spokes_num spoke_len -> c (spokes_num spoke_len)').to(device)
-    adjnufft_ob = tkbn.KbNufftAdjoint(im_size=im_size, grid_size=grid_size).to(
-        device)  # , grid_size=grid_size)
-    nufft_ob = tkbn.KbNufft(im_size=im_size, grid_size=grid_size).to(device)
-    # teop_ob = tkbn.ToepNufft()
-    # teop_kernel = tkbn.calc_toeplitz_kernel(kspace_traj,im_size,norm = 'ortho')
 
     w = eo.repeat(
         torch.linspace(-1, 1-2/spoke_len, spoke_len, device=device).abs(),
@@ -96,3 +92,4 @@ def cihat_pipe_density_compensation(kspace_traj, im_size, grid_size, device=torc
     return eo.rearrange(w,
                         '(spokes_num spoke_len) -> spokes_num spoke_len',
                         **spoke_shape).to(prev_device)
+
