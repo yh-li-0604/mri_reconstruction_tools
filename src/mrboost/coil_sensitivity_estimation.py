@@ -5,9 +5,9 @@ import torch
 import einops as eo
 import torchkbnufft as tkbn
 
-from src import computation as comp
-from src.density_compensation import cihat_pipe_density_compensation,pipe_density_compensation
-from src.torch_utils import center_crop
+from . import computation as comp
+from .density_compensation import cihat_pipe_density_compensation,pipe_density_compensation
+from .torch_utils import center_crop
 
 fft  = lambda x, ax : np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(x, axes=ax), axes=ax, norm='ortho'), axes=ax) 
 ifft = lambda X, ax : np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(X, axes=ax), axes=ax, norm='ortho'), axes=ax) 

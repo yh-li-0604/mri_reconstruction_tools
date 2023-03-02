@@ -6,7 +6,7 @@ dependencies = [
 ]
 
 [project]
-name = "mri_reconstruction_tools"
+name = "mrboost"
 version = "0.0.1"
 authors = [
   { name="Chunxu Guo", email="chunxu@wustl.edu" },

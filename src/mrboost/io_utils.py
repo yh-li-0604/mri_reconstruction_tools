@@ -15,7 +15,7 @@ from struct import pack
 from nibabel import load
 import h5py
 
-from src.twix_metadata_def import *
+from .twix_metadata_def import *
 
 
 def read_protocol(datFileLocation: Path, which_scan: int = -1, variables: List = ['iNoOfFourierLines', 'lPartitions', 'NEcoMeas']):

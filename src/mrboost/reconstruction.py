@@ -4,13 +4,13 @@ import numpy as np
 import torch
 import einops as eo
 import torchkbnufft as tkbn
-from src.mapvbvd.mapVBVD import mapVBVD
-from src.io_utils import *
-from src.twix_metadata_def import *
-import src.computation as comp
-import src.preprocessing as pre
-from src.coil_sensitivity_estimation import CoilSensitivityEstimator, Lowk_2D_CSE, Lowk_3D_CSE
-from src.density_compensation import cihat_pipe_density_compensation, voronoi_density_compensation
+from .mapvbvd.mapVBVD import mapVBVD
+from .io_utils import *
+from .twix_metadata_def import *
+from . import computation as comp
+from . import preprocessing as pre
+from .coil_sensitivity_estimation import CoilSensitivityEstimator, Lowk_2D_CSE, Lowk_3D_CSE
+from .density_compensation import cihat_pipe_density_compensation, voronoi_density_compensation
 
 
 class Reconstructor():

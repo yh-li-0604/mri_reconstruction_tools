@@ -10,9 +10,9 @@ from tqdm import tqdm
 import einops as eo
 import torchkbnufft as tkbn
 
-from src.io_utils import *
-from src.twix_metadata_def import *
-from src.torch_utils import jax_to_torch, torch_to_jax
+from .io_utils import *
+from .twix_metadata_def import *
+from .torch_utils import jax_to_torch, torch_to_jax
 
 def batch_process(batch_size:int, device:torch.device, batch_dim = 0):
     def Inner(func):

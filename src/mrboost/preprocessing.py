@@ -4,7 +4,7 @@ from pathlib import Path
 # import matlab.engine
 
 # from twix_metadata_def import *
-from src.io_utils import *
+from .io_utils import *
 import einops as eo
 
 def readMeasData_VE11_CCIR_CAPTURE(datFileLocation,

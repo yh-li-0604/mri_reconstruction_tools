@@ -6,13 +6,14 @@ import einops as eo
 import torchkbnufft as tkbn
 from pipe import Pipe
 from scipy.spatial import Voronoi
-from src import computation as comp
 from toolz.functoolz import curry, pipe
 # import taichi as ti
 from jax import vmap,pmap,jit
 import jax.numpy as jnp
 from jax.tree_util import tree_structure,tree_map
-from src.torch_utils import jax_to_torch, torch_to_jax,as_complex,as_real
+
+from . import computation as comp
+from .torch_utils import jax_to_torch, torch_to_jax,as_complex,as_real
 
 @jit
 def augment(kspace_traj_unique):
