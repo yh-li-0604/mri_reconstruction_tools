@@ -13,6 +13,7 @@ import einops as eo
 from tqdm import tqdm
 from struct import pack
 from nibabel import load
+import h5py
 
 from src.twix_metadata_def import *
 
@@ -299,8 +300,29 @@ def to_nifty():
     pass
 
 
-def to_hdf5():
-    pass
+def to_hdf5(img,output_path,affine=torch.eye(4,dtype=torch.float32), write_abs=True, write_complex=False):
+    with h5py.File(output_path,'w') as f:
+        dset = f.create_dataset('affine', data=affine)
+        if write_abs:
+            dset = f.create_dataset('abs', data=img.abs())
+        if write_complex:
+            dset = f.create_dataset('imag', data=img.imag)
+            dset = f.create_dataset('real', data=img.real)
+    print("Writed to: ",output_path)
+
+def from_hdf5(input_path, read_abs=True, read_complex=False):
+    return_item = []
+    with h5py.File(input_path, 'r') as f:
+        try:
+            return_item.append(f['affine'])
+        except KeyError:
+            return_item.append(torch.eye(4, dtype=torch.float32))
+        if read_abs:
+            return_item.append(f['abs'])
+        if read_complex:
+            return_item.append(f['real'])
+            return_item.append(f['imag'])
+    return return_item
 
 
 def to_npy():
@@ -311,7 +333,7 @@ def to_mat():
     pass
 
 
-def to_analyze(img, filename, affine = None, dtyep = np.float32):
+def to_analyze(img, filename, affine = None, dtype = np.float32):
     '''
     the input need to be numpy array shape like w h d, the d dimension can be stack to hyperstack in ImageJ
     '''

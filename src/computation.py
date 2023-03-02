@@ -5,12 +5,14 @@ import torch
 import scipy
 from torch.fft import ifftshift, ifft, fftshift, fft
 import torch.nn.functional as F
+from jax import numpy as np
 from tqdm import tqdm
 import einops as eo
 import torchkbnufft as tkbn
 
 from src.io_utils import *
 from src.twix_metadata_def import *
+from src.torch_utils import jax_to_torch, torch_to_jax
 
 def batch_process(batch_size:int, device:torch.device, batch_dim = 0):
     def Inner(func):
@@ -158,15 +160,16 @@ def recon_adjnufft(kspace_data, kspace_traj, adjnufft_ob, density_compensation_f
     kspace_density_compensation = density_compensation_func(
             kspace_traj=kspace_traj,
             im_size=adjnufft_ob.im_size.numpy(force=True),
-            grid_size=adjnufft_ob.grid_size.numpy(force=True))
+            grid_size=adjnufft_ob.grid_size.numpy(force=True),
+            device=kspace_data.device)
     kspace_data = eo.rearrange(
         kspace_data*kspace_density_compensation,
         '... ch slice spoke spoke_len-> ... slice ch (spoke spoke_len)')
     kspace_traj = eo.rearrange(
         kspace_traj,
         '... c spoke spoke_len -> ... c (spoke spoke_len)') # c stands for complex channel
-    img = adjnufft_ob.forward((kspace_data).contiguous(), kspace_traj,norm='ortho')
-
+    
+    img = adjnufft_ob.forward(kspace_data.contiguous(), kspace_traj,norm='ortho')
     img = eo.rearrange(img,'slice ch h w-> ch slice h w')
     return img
 
@@ -176,8 +179,8 @@ def polygon_area(vertices):
     '''
     x,y = vertices[:,0],vertices[:,1]
     correction = x[-1] * y[0] - y[-1]* x[0]
-    main_area = torch.dot(x[:-1], y[1:]) - torch.dot(y[:-1], x[1:])
-    return 0.5*torch.abs(main_area + correction)
+    main_area = np.dot(x[:-1], y[1:]) - np.dot(y[:-1], x[1:])
+    return 0.5*np.abs(main_area + correction)
 
 def normalization(img):
     return (img-img.mean())/img.std()
