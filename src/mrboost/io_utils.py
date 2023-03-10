@@ -314,14 +314,14 @@ def from_hdf5(input_path, read_abs=True, read_complex=False):
     return_item = []
     with h5py.File(input_path, 'r') as f:
         try:
-            return_item.append(f['affine'])
+            return_item.append(f['affine'][:])
         except KeyError:
             return_item.append(torch.eye(4, dtype=torch.float32))
         if read_abs:
-            return_item.append(f['abs'])
+            return_item.append(f['abs'][:])
         if read_complex:
-            return_item.append(f['real'])
-            return_item.append(f['imag'])
+            return_item.append(f['real'][:])
+            return_item.append(f['imag'][:])
     return return_item
 
 
