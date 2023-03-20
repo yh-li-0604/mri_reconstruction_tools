@@ -9,6 +9,7 @@ from scipy.spatial import Voronoi
 from toolz.functoolz import curry, pipe
 # import taichi as ti
 from jax import vmap,pmap,jit
+import jax
 import jax.numpy as jnp
 from jax.tree_util import tree_structure,tree_map
 
@@ -31,29 +32,30 @@ def voronoi_density_compensation(kspace_traj: torch.Tensor,
     kspace_traj_complex = eo.rearrange(
             kspace_traj, 'c spokes_num spoke_len -> (spokes_num spoke_len) c')
     kspace_traj_complex = torch.view_as_complex(kspace_traj_complex.contiguous()).to(device)
-    kspace_traj_complex = torch_to_jax(kspace_traj_complex)
-    kspace_traj_complex = kspace_traj_complex/jnp.abs(kspace_traj_complex).max()/2 # normalize to -0.5,0.5
-    kspace_traj_unique,  reverse_indices = jnp.unique(kspace_traj_complex, return_inverse=True, axis=0)
-    kspace_traj_len = kspace_traj_unique.shape[0]
+    with jax.default_device(jax.devices("cpu")[0]):
+        kspace_traj_complex = torch_to_jax(kspace_traj_complex)
+        kspace_traj_complex = kspace_traj_complex/jnp.abs(kspace_traj_complex).max()/2 # normalize to -0.5,0.5
+        kspace_traj_unique,  reverse_indices = jnp.unique(kspace_traj_complex, return_inverse=True, axis=0)
+        kspace_traj_len = kspace_traj_unique.shape[0]
 
-    # draw a circle around spokes
-    # plt.scatter(kspace_traj_augmented.real,kspace_traj_augmented.imag,s=0.5)
-    kspace_traj_augmented = np.asarray(augment(kspace_traj_unique))
-    vor = Voronoi(kspace_traj_augmented)
-    def compute_area(region):
-        if len(region) != 0:
-            polygon = vor.vertices[region,]
-            area = comp.polygon_area(polygon)
-        else:
-            area = float('inf')
-        return area
-    regions_area = jnp.array(tree_map(compute_area,vor.regions, is_leaf=lambda x:  len(x)==0 or isinstance(x[0], int)))
-    regions_area = regions_area[vor.point_region][:kspace_traj_len]
-    regions_area /= jnp.sum(regions_area)
-    regions_area = regions_area[reverse_indices]
-    regions_area = eo.rearrange(
-        regions_area, '(spokes_num spoke_len) -> spokes_num spoke_len', **spoke_shape)
-    regions_area = jax_to_torch(regions_area)
+        # draw a circle around spokes
+        # plt.scatter(kspace_traj_augmented.real,kspace_traj_augmented.imag,s=0.5)
+        kspace_traj_augmented = np.asarray(augment(kspace_traj_unique))
+        vor = Voronoi(kspace_traj_augmented)
+        def compute_area(region):
+            if len(region) != 0:
+                polygon = vor.vertices[region,]
+                area = comp.polygon_area(polygon)
+            else:
+                area = float('inf')
+            return area
+        regions_area = jnp.array(tree_map(compute_area,vor.regions, is_leaf=lambda x:  len(x)==0 or isinstance(x[0], int)))
+        regions_area = regions_area[vor.point_region][:kspace_traj_len]
+        regions_area /= jnp.sum(regions_area)
+        regions_area = regions_area[reverse_indices]
+        regions_area = eo.rearrange(
+            regions_area, '(spokes_num spoke_len) -> spokes_num spoke_len', **spoke_shape)
+        regions_area = jax_to_torch(regions_area)
     regions_area[:, spoke_shape['spoke_len']//2] /= spoke_shape['spokes_num']
     # Duplicate density for previously-removed points [i.e. DC points]
     return regions_area

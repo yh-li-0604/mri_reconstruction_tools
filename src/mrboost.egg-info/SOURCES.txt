@@ -1,4 +1,5 @@
 LICENSE
+README.md
 pyproject.toml
 src/mrboost/__init__.py
 src/mrboost/coil_sensitivity_estimation.py
