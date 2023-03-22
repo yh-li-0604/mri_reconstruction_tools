@@ -12,7 +12,7 @@ import einops as eo
 
 from tqdm import tqdm
 from struct import pack
-from nibabel import load
+import nibabel as nib
 import h5py
 
 from .twix_metadata_def import *
@@ -296,13 +296,15 @@ def check_mk_dirs(paths):
     return paths
 
 
-def to_nifty():
-    pass
+def to_nifty(img,output_path,affine=torch.eye(4,dtype=torch.float32)):
+    nib.save(nib.Nifti1Image(img, affine), output_path)
+    print("Writed to: ",output_path)
 
 
 def to_hdf5(img,output_path,affine=torch.eye(4,dtype=torch.float32), write_abs=True, write_complex=False):
     with h5py.File(output_path,'w') as f:
-        dset = f.create_dataset('affine', data=affine)
+        if affine is not None:
+            dset = f.create_dataset('affine', data=affine)
         if write_abs:
             dset = f.create_dataset('abs', data=img.abs())
         if write_complex:
