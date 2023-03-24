@@ -129,8 +129,6 @@ def generate_golden_angle_radial_spokes_kspace_trajctory(spokes_num, spoke_lengt
     ktraj = torch.stack((kx, ky), dim=0)
     return ktraj
 
-
-
 def data_binning(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num, spokes_per_phase):
     spoke_len = data.shape[-1]
     output = eo.rearrange(
@@ -156,12 +154,7 @@ def data_binning(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num,
         spoke = spokes_per_phase)
     return output
 
-def recon_adjnufft(kspace_data, kspace_traj, adjnufft_ob, density_compensation_func):
-    kspace_density_compensation = density_compensation_func(
-            kspace_traj=kspace_traj,
-            im_size=adjnufft_ob.im_size.numpy(force=True),
-            grid_size=adjnufft_ob.grid_size.numpy(force=True),
-            device=kspace_data.device)
+def recon_adjnufft(kspace_data, kspace_traj, kspace_density_compensation, adjnufft_ob):
     kspace_data = eo.rearrange(
         kspace_data*kspace_density_compensation,
         '... ch slice spoke spoke_len-> ... slice ch (spoke spoke_len)')

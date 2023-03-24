@@ -1,6 +1,6 @@
 from dataclasses import field
 import numpy as np
-import sigpy as sp
+# import sigpy as sp
 import torch
 import einops as eo
 import torchkbnufft as tkbn
@@ -271,149 +271,149 @@ class ESPIRIT(CoilSensitivityEstimator):
         return super().__getitem__(key)
 
 
-class Espirit_CSE(sp.app.App):
-    """ESPIRiT calibration.
-    Currently only supports outputting one set of maps.
-    Args:
-        ksp (array): k-space array of shape [num_coils, n_ndim, ..., n_1]
-        calib (tuple of ints): length-3 image shape. DHW
-        thresh (float): threshold for the calibration matrix.
-        kernel_width (int): kernel width for the calibration matrix.
-        max_power_iter (int): maximum number of power iterations.
-        device (Device): computing device.
-        crop (int): cropping threshold.
-    Returns:
-        array: ESPIRiT maps of the same shape as ksp.
-    References:
-        Martin Uecker, Peng Lai, Mark J. Murphy, Patrick Virtue, Michael Elad,
-        John M. Pauly, Shreyas S. Vasanawala, and Michael Lustig
-        ESPIRIT - An Eigenvalue Approach to Autocalibrating Parallel MRI:
-        Where SENSE meets GRAPPA.
-        Magnetic Resonance in Medicine, 71:990-1001 (2014)
-    """
-    def __init__(self, kspace_data, kspace_traj, im_size, calib_width=(8,24,24),
-                 thresh=0.02, kernel_width=6, crop=0.95,
-                 max_iter=100, batch_size=2, device=sp.cpu_device,
-                 output_eigenvalue=False,show_pbar=True):
-        self.device = device
-        self.output_eigenvalue = output_eigenvalue
-        self.crop = crop
-        self.coil_sens = field(default_factory=torch.Tensor)
+# class Espirit_CSE(sp.app.App):
+#     """ESPIRiT calibration.
+#     Currently only supports outputting one set of maps.
+#     Args:
+#         ksp (array): k-space array of shape [num_coils, n_ndim, ..., n_1]
+#         calib (tuple of ints): length-3 image shape. DHW
+#         thresh (float): threshold for the calibration matrix.
+#         kernel_width (int): kernel width for the calibration matrix.
+#         max_power_iter (int): maximum number of power iterations.
+#         device (Device): computing device.
+#         crop (int): cropping threshold.
+#     Returns:
+#         array: ESPIRiT maps of the same shape as ksp.
+#     References:
+#         Martin Uecker, Peng Lai, Mark J. Murphy, Patrick Virtue, Michael Elad,
+#         John M. Pauly, Shreyas S. Vasanawala, and Michael Lustig
+#         ESPIRIT - An Eigenvalue Approach to Autocalibrating Parallel MRI:
+#         Where SENSE meets GRAPPA.
+#         Magnetic Resonance in Medicine, 71:990-1001 (2014)
+#     """
+#     def __init__(self, kspace_data, kspace_traj, im_size, calib_width=(8,24,24),
+#                  thresh=0.02, kernel_width=6, crop=0.95,
+#                  max_iter=100, batch_size=2, device=sp.cpu_device,
+#                  output_eigenvalue=False,show_pbar=True):
+#         self.device = device
+#         self.output_eigenvalue = output_eigenvalue
+#         self.crop = crop
+#         self.coil_sens = field(default_factory=torch.Tensor)
 
-        shape_dict = eo.parse_shape(kspace_data, 'ch_num slice_num spoke_num spoke_len ')
-        img_ndim = len(im_size)
-        num_coils = shape_dict['ch_num']
+#         shape_dict = eo.parse_shape(kspace_data, 'ch_num slice_num spoke_num spoke_len ')
+#         img_ndim = len(im_size)
+#         num_coils = shape_dict['ch_num']
 
-        # kspace density compensation
-        kspace_density_compensation = pipe_density_compensation(kspace_traj, im_size)
+#         # kspace density compensation
+#         kspace_density_compensation = pipe_density_compensation(kspace_traj, im_size)
         
-        # we need only the center of k-space, which we have fully samples during scanning
-        center_crop_shape = [ num_coils, 2*calib_width[0],shape_dict['spoke_num'],2*calib_width[2]]
-        kspace_data = center_crop(kspace_data*kspace_density_compensation,center_crop_shape)
-        # from matplotlib import pyplot as plt
-        # plt.imshow(torch.abs(kspace_data[0,5,250:300,:]))
-        # assert False, "breakpoint"
-        kspace_traj = center_crop(kspace_traj,[2,shape_dict['spoke_num'],calib_width[1]*2])
-        # from matplotlib import pyplot as plt
-        # plt.scatter(x=kspace_traj[0,250:300],y=kspace_traj[1,250:300])
-        # assert False, "breakpoint"
-        # print('test',kspace_data.shape)
+#         # we need only the center of k-space, which we have fully samples during scanning
+#         center_crop_shape = [ num_coils, 2*calib_width[0],shape_dict['spoke_num'],2*calib_width[2]]
+#         kspace_data = center_crop(kspace_data*kspace_density_compensation,center_crop_shape)
+#         # from matplotlib import pyplot as plt
+#         # plt.imshow(torch.abs(kspace_data[0,5,250:300,:]))
+#         # assert False, "breakpoint"
+#         kspace_traj = center_crop(kspace_traj,[2,shape_dict['spoke_num'],calib_width[1]*2])
+#         # from matplotlib import pyplot as plt
+#         # plt.scatter(x=kspace_traj[0,250:300],y=kspace_traj[1,250:300])
+#         # assert False, "breakpoint"
+#         # print('test',kspace_data.shape)
 
-        # resample the golden-angle data to cartesian k-space to get calib region
-        # do we need kspace-density compensation?
-        kspace_data = eo.rearrange(
-            kspace_data, 'ch_num slice_num spoke_num spoke_len -> slice_num ch_num (spoke_num spoke_len)'
-            ).contiguous()
-        kspace_traj = eo.rearrange(kspace_traj, 'c spoke_num spoke_len -> c (spoke_num spoke_len)')
-        grid_size = (calib_width[1]*2,calib_width[2]*2)
-        kspace_interp_ob = tkbn.KbInterpAdjoint(im_size=grid_size,grid_size=grid_size,numpoints=6)#,n_shift=(grid_size[0],grid_size[0]))
-        kspace_data_cartesian = torch.fft.ifftshift(kspace_interp_ob(kspace_data,kspace_traj),[-1,-2])
-        kspace_data_cartesian = eo.rearrange(
-            kspace_data_cartesian, 'slice_num ch_num h w -> ch_num slice_num h w')
+#         # resample the golden-angle data to cartesian k-space to get calib region
+#         # do we need kspace-density compensation?
+#         kspace_data = eo.rearrange(
+#             kspace_data, 'ch_num slice_num spoke_num spoke_len -> slice_num ch_num (spoke_num spoke_len)'
+#             ).contiguous()
+#         kspace_traj = eo.rearrange(kspace_traj, 'c spoke_num spoke_len -> c (spoke_num spoke_len)')
+#         grid_size = (calib_width[1]*2,calib_width[2]*2)
+#         kspace_interp_ob = tkbn.KbInterpAdjoint(im_size=grid_size,grid_size=grid_size,numpoints=6)#,n_shift=(grid_size[0],grid_size[0]))
+#         kspace_data_cartesian = torch.fft.ifftshift(kspace_interp_ob(kspace_data,kspace_traj),[-1,-2])
+#         kspace_data_cartesian = eo.rearrange(
+#             kspace_data_cartesian, 'slice_num ch_num h w -> ch_num slice_num h w')
         
-        # print(kspace_data_cartesian)
-        from matplotlib import pyplot as plt
-        plt.imshow(torch.abs(kspace_data_cartesian[0,5]),vmin=0,vmax=0.5)
-        assert False, "breakpoint"
-        kspace_data = sp.from_pytorch(torch.view_as_real(kspace_data_cartesian), iscomplex=True)
-        print(kspace_data.shape)
-        # print(kspace_data[0,8])
-        with sp.get_device(kspace_data):
-            # Get calibration region
-            calib_shape = (num_coils,) + calib_width
-            print(calib_shape)
-            calib = sp.resize(kspace_data, calib_shape)
-            print(calib)
-            calib = sp.to_device(calib, device)
-        print(calib)
+#         # print(kspace_data_cartesian)
+#         from matplotlib import pyplot as plt
+#         plt.imshow(torch.abs(kspace_data_cartesian[0,5]),vmin=0,vmax=0.5)
+#         assert False, "breakpoint"
+#         kspace_data = sp.from_pytorch(torch.view_as_real(kspace_data_cartesian), iscomplex=True)
+#         print(kspace_data.shape)
+#         # print(kspace_data[0,8])
+#         with sp.get_device(kspace_data):
+#             # Get calibration region
+#             calib_shape = (num_coils,) + calib_width
+#             print(calib_shape)
+#             calib = sp.resize(kspace_data, calib_shape)
+#             print(calib)
+#             calib = sp.to_device(calib, device)
+#         print(calib)
 
-        xp = self.device.xp
-        with self.device:
-            # Get calibration matrix.
-            # Shape [num_coils] + num_blks + [kernel_width] * img_ndim
-            mat = sp.array_to_blocks(
-                calib, [kernel_width] * img_ndim, [1] * img_ndim)
-            mat = mat.reshape([num_coils, -1, kernel_width**img_ndim])
-            mat = mat.transpose([1, 0, 2])
-            mat = mat.reshape([-1, num_coils * kernel_width**img_ndim])
-            # print(mat)
+#         xp = self.device.xp
+#         with self.device:
+#             # Get calibration matrix.
+#             # Shape [num_coils] + num_blks + [kernel_width] * img_ndim
+#             mat = sp.array_to_blocks(
+#                 calib, [kernel_width] * img_ndim, [1] * img_ndim)
+#             mat = mat.reshape([num_coils, -1, kernel_width**img_ndim])
+#             mat = mat.transpose([1, 0, 2])
+#             mat = mat.reshape([-1, num_coils * kernel_width**img_ndim])
+#             # print(mat)
 
-            # Perform SVD on calibration matrix
-            _, S, VH = xp.linalg.svd(mat, full_matrices=False)
-            VH = VH[S > thresh * S.max(), :]
+#             # Perform SVD on calibration matrix
+#             _, S, VH = xp.linalg.svd(mat, full_matrices=False)
+#             VH = VH[S > thresh * S.max(), :]
 
-            # Get kernels
-            num_kernels = len(VH)
-            kernels = VH.reshape(
-                [num_kernels, num_coils] + [kernel_width] * img_ndim)
-            # img_shape = kspace_data.shape[1:]
-            img_shape = (shape_dict['slice_num'],)+im_size
+#             # Get kernels
+#             num_kernels = len(VH)
+#             kernels = VH.reshape(
+#                 [num_kernels, num_coils] + [kernel_width] * img_ndim)
+#             # img_shape = kspace_data.shape[1:]
+#             img_shape = (shape_dict['slice_num'],)+im_size
 
-            # Get covariance matrix in image domain
-            AHA = xp.zeros(img_shape[::-1] + (num_coils, num_coils),
-                           dtype=kspace_data.dtype)
-            for kernel in kernels:
-                print(kernel.shape)
-                img_kernel = sp.ifft(sp.resize(kernel, (num_coils,)+img_shape),
-                                     axes=range(-img_ndim, 0))
-                aH = xp.expand_dims(img_kernel.T, axis=-1)
-                a = xp.conj(aH.swapaxes(-1, -2))
-                AHA += aH @ a
+#             # Get covariance matrix in image domain
+#             AHA = xp.zeros(img_shape[::-1] + (num_coils, num_coils),
+#                            dtype=kspace_data.dtype)
+#             for kernel in kernels:
+#                 print(kernel.shape)
+#                 img_kernel = sp.ifft(sp.resize(kernel, (num_coils,)+img_shape),
+#                                      axes=range(-img_ndim, 0))
+#                 aH = xp.expand_dims(img_kernel.T, axis=-1)
+#                 a = xp.conj(aH.swapaxes(-1, -2))
+#                 AHA += aH @ a
 
-            AHA *= (sp.prod(img_shape) / kernel_width**img_ndim)
-            self.mps = xp.ones(img_shape[::-1]+(num_coils,) + (1, ), dtype=kspace_data.dtype)
+#             AHA *= (sp.prod(img_shape) / kernel_width**img_ndim)
+#             self.mps = xp.ones(img_shape[::-1]+(num_coils,) + (1, ), dtype=kspace_data.dtype)
 
-            def forward(x):
-                with sp.get_device(x):
-                    return AHA @ x
+#             def forward(x):
+#                 with sp.get_device(x):
+#                     return AHA @ x
 
-            def normalize(x):
-                with sp.get_device(x):
-                    return xp.sum(xp.abs(x)**2,
-                                  axis=-2, keepdims=True)**0.5
+#             def normalize(x):
+#                 with sp.get_device(x):
+#                     return xp.sum(xp.abs(x)**2,
+#                                   axis=-2, keepdims=True)**0.5
 
-            alg = sp.alg.PowerMethod(
-                forward, self.mps, norm_func=normalize,
-                max_iter=max_iter)
-        super().__init__(alg, show_pbar=show_pbar)
+#             alg = sp.alg.PowerMethod(
+#                 forward, self.mps, norm_func=normalize,
+#                 max_iter=max_iter)
+#         super().__init__(alg, show_pbar=show_pbar)
 
-    def _output(self):
-        xp = self.device.xp
-        with self.device:
-            # Normalize phase with respect to first channel
-            mps = self.mps.T[0]
-            mps *= xp.conj(mps[0] / xp.abs(mps[0]))
+#     def _output(self):
+#         xp = self.device.xp
+#         with self.device:
+#             # Normalize phase with respect to first channel
+#             mps = self.mps.T[0]
+#             mps *= xp.conj(mps[0] / xp.abs(mps[0]))
 
-            # Crop maps by thresholding eigenvalue
-            max_eig = self.alg.max_eig.T[0]
-            mps *= max_eig > self.crop
+#             # Crop maps by thresholding eigenvalue
+#             max_eig = self.alg.max_eig.T[0]
+#             mps *= max_eig > self.crop
 
-        if self.output_eigenvalue:
-            return mps, max_eig
-        else:
-            return mps
+#         if self.output_eigenvalue:
+#             return mps, max_eig
+#         else:
+#             return mps
     
-    def __getitem__(self, key):
-        current_contrast = key[0]
-        current_phase = key[1]
-        return self.coil_sens.__getitem__(key[2:])
+#     def __getitem__(self, key):
+#         current_contrast = key[0]
+#         current_phase = key[1]
+#         return self.coil_sens.__getitem__(key[2:])

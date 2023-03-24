@@ -1,15 +1,3 @@
-Metadata-Version: 2.1
-Name: mrboost
-Version: 0.0.1
-Summary: Some useful tools for MRI reconstruction
-Author-email: Chunxu Guo <chunxu@wustl.edu>
-Classifier: Programming Language :: Python :: 3
-Classifier: License :: OSI Approved :: MIT License
-Classifier: Operating System :: OS Independent
-Requires-Python: >=3.9
-Description-Content-Type: text/markdown
-License-File: LICENSE
-
 # mri_reconstruction_tools
 
 ## Installation

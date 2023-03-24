@@ -45,23 +45,12 @@ class Reconstructor():
     def __args_init(self, *args, **kwargs):
         self.amplitude_scale_factor = 80 * 20 * 131072 / 65536 * 20000
 
-        self.slice_num = round(self.twixobj.hdr.Meas.lImagesPerSlab *
-                               (1+self.twixobj.hdr.Meas.dSliceOversamplingForDialog))
-        if self.which_slice == -1:
-            self.which_slice = (0, self.slice_num)
-        self.which_slice = (self.which_slice, self.which_slice +
-                            1) if isinstance(self.which_slice, int) else self.which_slice
-        assert self.which_slice[
-            1] <= self.slice_num, f"Try to set {self.which_slice[1]=} <= {self.slice_num=}"
-        self.slice_to_recon = [i for i in range(
-            self.slice_num)][slice(*self.which_slice)]
         self.kspace_centre_partition_num = int(
             self.mdh.ushKSpaceCentrePartitionNo[0])  # important! -1 because of nav
 
         self.ch_num = self.shape_dict['ch_num']
         self.total_partition_num = self.shape_dict['partition_num']
-        self.partition_num = self.total_partition_num - \
-            1  # this number does not contain navigator
+        self.partition_num = self.total_partition_num - 1  # this number does not contain navigator
         self.spoke_num = self.shape_dict['spoke_num']
         self.spoke_len = self.shape_dict['spoke_len']
 
@@ -94,6 +83,103 @@ class Reconstructor():
         kspace_data, kspace_traj = data_dict['kspace_data'], data_dict['kspace_traj']
 
 
+class BlackBoneStackOfStars_Subset_4DL_LowResZ(Reconstructor):
+    def __init__(self,
+                 dat_file_location: Path = Path(
+                     '/data/anlab/Chunxu/meas_MID00017_FID93856_fl3d_vibe_GA_BlackBone_20210507.dat'),
+                 spokes_to_recon: Union[int, Sequence] = (6,400),#(0,-1)  -1 means all
+                 which_slice: Union[int, Sequence] = (0, 80),
+                 percentW: float = 12.5,
+                 cache_folder: Path = Path('.')/'cache',
+                 device: torch.device = torch.device('cpu')) -> None:
+        self.percentW = percentW
+        self.cache_folder = cache_folder
+        self.spokes_to_recon = spokes_to_recon
+
+        super().__init__(dat_file_location, which_slice, device)
+
+    def args_init_post(self):
+        self.slice_num = round(self.twixobj.hdr.Meas.lImagesPerSlab)
+        if self.which_slice == -1:
+            self.which_slice = (0, self.slice_num)
+        self.which_slice = (self.which_slice, self.which_slice +
+                            1) if isinstance(self.which_slice, int) else self.which_slice
+        assert self.which_slice[
+            1] <= self.slice_num, f"Try to set {self.which_slice[1]=} <= {self.slice_num=}"
+        self.slice_to_recon = [i for i in range(
+            self.slice_num)][slice(*self.which_slice)]
+        
+        # build nufft operators
+        self.adjnufft_ob = tkbn.KbNufftAdjoint(im_size=self.im_size, grid_size=self.grid_size).to(
+            self.device)
+        self.nufft_ob = tkbn.KbNufft(im_size=self.im_size, grid_size=self.grid_size).to(
+            self.device)
+
+    def data_preprocess(self, data_raw):
+        data_raw *= self.amplitude_scale_factor
+        kspace_data_raw = data_raw[:, :, self.spokes_to_recon[0]:self.spokes_to_recon[1], :]
+
+        kspace_traj = 2*torch.pi * comp.generate_golden_angle_radial_spokes_kspace_trajctory(
+            self.spoke_num, self.spoke_len)[:, self.spokes_to_recon[0]:self.spokes_to_recon[1]]
+
+        kspace_data_centralized, kspace_data_z = self.kspace_data_preprocess(
+            kspace_data_raw)
+
+        # cse = Lowk_2D_CSE(kspace_data_centralized, kspace_traj, self.nufft_ob, self.adjnufft_ob,
+        #                   hamming_filter_ratio=0.05, batch_size=1, device=self.device)
+
+        cse = Lowk_3D_CSE(kspace_data_centralized, kspace_traj,self.nufft_ob, self.adjnufft_ob,
+                          hamming_filter_ratio=[0.05,0.05], batch_size=2, device=self.device)
+        sp = eo.parse_shape(kspace_data_z, 'ch slice_num spoke_num spoke_len')
+        kspace_density_compensation = torch.zeros((sp['spoke_num'],sp['spoke_len']),dtype=torch.float32,device = kspace_traj.device)
+            # (self.contra_to_recon,self.phase_to_recon,self.spokes_per_phase,self.spoke_len))
+        kspace_density_compensation = voronoi_density_compensation(
+            kspace_traj,
+            im_size=self.im_size,
+            grid_size=self.grid_size,
+            device=kspace_traj.device)
+        return dict(kspace_data=kspace_data_z, kspace_traj=kspace_traj,kspace_density_compensation = kspace_density_compensation, cse=cse)
+
+    def kspace_data_preprocess(self, kspace_data_raw):
+        kspace_data_centralized = comp.centralize_kspace(
+            kspace_data=torch.from_numpy(kspace_data_raw),
+            acquire_length=self.partition_num,
+            # -1 because of navigator, and this number is index started from 0
+            center_idx_in_acquire_lenth=self.kspace_centre_partition_num-1,
+            full_length=self.slice_num,
+            dim=1)
+
+        kspace_data_z = comp.batch_process(batch_size=2, device=self.device)(
+            comp.ifft_1D)(kspace_data_centralized, dim=1)
+        # flip or not, doesnt change much
+        kspace_data_z = torch.flip(kspace_data_z, dims=(1,))
+        return kspace_data_centralized, kspace_data_z
+
+    def reconstruction(self, data_dict):
+        kspace_data, kspace_traj,kspace_density_compensation, cse = data_dict['kspace_data'], data_dict['kspace_traj'], data_dict['kspace_density_compensation'], data_dict['cse']
+
+        img = torch.zeros((len(self.slice_to_recon), self.im_size[0]//2, self.im_size[1]//2), dtype=torch.complex64)
+        sensitivity_map = cse[0,0].to(torch.complex64).conj()[
+                :, self.slice_to_recon]
+        output = comp.batch_process(batch_size=2, device=self.device)(comp.recon_adjnufft)(
+                kspace_data,  # , self.first_slice:args.last_slice],
+                kspace_traj=kspace_traj,
+                kspace_density_compensation=kspace_density_compensation,
+                adjnufft_ob=self.adjnufft_ob,
+            )[:, self.slice_to_recon, self.im_size[0]//2-self.im_size[0]//4:self.im_size[0]//2+self.im_size[0]//4,
+              self.im_size[1]//2-self.im_size[1]//4:self.im_size[1]//2+self.im_size[1]//4]
+        output *= sensitivity_map
+        img = eo.reduce(
+                    torch.flip(output, (-1,)), 'ch slice w h -> slice w h', 'sum')
+        return img
+
+    def forward(self):
+        data_raw = self.get_raw_data(self.dat_file_location)
+        self.args_init()
+        data_dict = self.data_preprocess(data_raw)
+        img = self.reconstruction(data_dict)
+        return img
+
 class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
     def __init__(self,
                  dat_file_location: Path = Path(
@@ -116,9 +202,21 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         self.time_per_contrast = time_per_contrast
         self.percentW = percentW
         self.cache_folder = cache_folder
+
         super().__init__(dat_file_location, which_slice, device)
 
     def args_init_post(self):
+        self.slice_num = round(self.twixobj.hdr.Meas.lImagesPerSlab *
+                               (1+self.twixobj.hdr.Meas.dSliceOversamplingForDialog))
+        if self.which_slice == -1:
+            self.which_slice = (0, self.slice_num)
+        self.which_slice = (self.which_slice, self.which_slice +
+                            1) if isinstance(self.which_slice, int) else self.which_slice
+        assert self.which_slice[
+            1] <= self.slice_num, f"Try to set {self.which_slice[1]=} <= {self.slice_num=}"
+        self.slice_to_recon = [i for i in range(
+            self.slice_num)][slice(*self.which_slice)]
+
         self.start_spokes_to_discard = max(
             max(self.phase_num, 10), self.phase_num*np.ceil(10/self.phase_num))
 
@@ -180,7 +278,16 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
             [sorted_r_idx]*2, [self.contra_num]*2,
             [self.spokes_per_contra]*2, [self.phase_num]*2,
             [self.spokes_per_phase]*2)
-        return dict(kspace_data=kspace_data, kspace_traj=kspace_traj, cse=cse)
+        sp = eo.parse_shape(kspace_data, 'contra_num phase_num ch slice_num spoke_num spoke_len')
+        kspace_density_compensation = torch.zeros((sp['contra_num'],sp['phase_num'],sp['spoke_num'],sp['spoke_len']),dtype=torch.float32,device = kspace_traj.device)
+            # (self.contra_to_recon,self.phase_to_recon,self.spokes_per_phase,self.spoke_len))
+        for t, ph in product(self.contra_to_recon, self.phase_to_recon):
+            kspace_density_compensation = voronoi_density_compensation(
+                kspace_traj[t, ph],
+                im_size=self.adjnufft_ob.im_size.numpy(force=True),
+                grid_size=self.adjnufft_ob.grid_size.numpy(force=True),
+                device=kspace_traj.device)
+        return dict(kspace_data=kspace_data, kspace_traj=kspace_traj,kspace_density_compensation = kspace_density_compensation, cse=cse)
 
     def navigator_preprocess(self, nav):
         ch, rotation, respiratory_curve = comp.tuned_and_robust_estimation(
@@ -214,7 +321,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         return kspace_data_centralized, kspace_data_z
 
     def reconstruction(self, data_dict):
-        kspace_data, kspace_traj, cse = data_dict['kspace_data'], data_dict['kspace_traj'], data_dict['cse']
+        kspace_data, kspace_traj,kspace_density_compensation, cse = data_dict['kspace_data'], data_dict['kspace_traj'], data_dict['kspace_density_compensation'], data_dict['cse']
 
         img = torch.zeros((len(self.contra_to_recon), len(self.phase_to_recon), len(
             self.slice_to_recon), self.im_size[0]//2, self.im_size[1]//2), dtype=torch.complex64)
@@ -225,8 +332,8 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
             output = comp.batch_process(batch_size=2, device=self.device)(comp.recon_adjnufft)(
                 kspace_data[t, ph, :],  # , self.first_slice:args.last_slice],
                 kspace_traj=kspace_traj[t, ph],
+                kspace_density_compensation=kspace_density_compensation[t,ph],
                 adjnufft_ob=self.adjnufft_ob,
-                density_compensation_func=voronoi_density_compensation
             )[:, self.slice_to_recon, self.im_size[0]//2-self.im_size[0]//4:self.im_size[0]//2+self.im_size[0]//4,
               self.im_size[1]//2-self.im_size[1]//4:self.im_size[1]//2+self.im_size[1]//4]
             output *= sensitivity_map
