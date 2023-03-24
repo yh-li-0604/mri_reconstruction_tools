@@ -203,6 +203,9 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         self.percentW = percentW
         self.cache_folder = cache_folder
 
+        super().__init__(dat_file_location, which_slice, device)
+
+    def args_init_post(self):
         self.slice_num = round(self.twixobj.hdr.Meas.lImagesPerSlab *
                                (1+self.twixobj.hdr.Meas.dSliceOversamplingForDialog))
         if self.which_slice == -1:
@@ -213,9 +216,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
             1] <= self.slice_num, f"Try to set {self.which_slice[1]=} <= {self.slice_num=}"
         self.slice_to_recon = [i for i in range(
             self.slice_num)][slice(*self.which_slice)]
-        super().__init__(dat_file_location, which_slice, device)
 
-    def args_init_post(self):
         self.start_spokes_to_discard = max(
             max(self.phase_num, 10), self.phase_num*np.ceil(10/self.phase_num))
 
