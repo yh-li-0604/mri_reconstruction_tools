@@ -282,7 +282,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         kspace_density_compensation = torch.zeros((sp['contra_num'],sp['phase_num'],sp['spoke_num'],sp['spoke_len']),dtype=torch.float32,device = kspace_traj.device)
             # (self.contra_to_recon,self.phase_to_recon,self.spokes_per_phase,self.spoke_len))
         for t, ph in product(self.contra_to_recon, self.phase_to_recon):
-            kspace_density_compensation = voronoi_density_compensation(
+            kspace_density_compensation[t,ph] = voronoi_density_compensation(
                 kspace_traj[t, ph],
                 im_size=self.adjnufft_ob.im_size.numpy(force=True),
                 grid_size=self.adjnufft_ob.grid_size.numpy(force=True),
