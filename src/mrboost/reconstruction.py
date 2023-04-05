@@ -291,7 +291,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
 
     def navigator_preprocess(self, nav):
         ch, rotation, respiratory_curve = comp.tuned_and_robust_estimation(
-            navigator=nav, percentW=self.percentW, Fs=self.Fs, FOV=self.FOV, ndata=self.spoke_len)
+            navigator=nav, percentW=self.percentW, Fs=self.Fs, FOV=self.FOV, ndata=self.spoke_len,device=self.device)
         # here rotation is index of 100 different degree, to get same with cihat, please+1
         respiratory_curve_contrast = eo.rearrange(
             respiratory_curve[self.binning_start_idx:self.binning_end_idx],
@@ -320,27 +320,32 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         kspace_data_z = torch.flip(kspace_data_z, dims=(1,))
         return kspace_data_centralized, kspace_data_z
 
-    def reconstruction(self, data_dict):
+    def reconstruction(self, data_dict, contrast, phase, return_multi_channel=False):
         kspace_data, kspace_traj,kspace_density_compensation, cse = data_dict['kspace_data'], data_dict['kspace_traj'], data_dict['kspace_density_compensation'], data_dict['cse']
-
-        img = torch.zeros((len(self.contra_to_recon), len(self.phase_to_recon), len(
-            self.slice_to_recon), self.im_size[0]//2, self.im_size[1]//2), dtype=torch.complex64)
-        for t, ph in product(self.contra_to_recon, self.phase_to_recon):
-            print('NUFFT for contrast:{}, phase:{}'.format(t, ph))
-            sensitivity_map = cse[t, ph].to(torch.complex64).conj()[
-                :, self.slice_to_recon]
-            output = comp.batch_process(batch_size=2, device=self.device)(comp.recon_adjnufft)(
-                kspace_data[t, ph, :],  # , self.first_slice:args.last_slice],
-                kspace_traj=kspace_traj[t, ph],
-                kspace_density_compensation=kspace_density_compensation[t,ph],
-                adjnufft_ob=self.adjnufft_ob,
-            )[:, self.slice_to_recon, self.im_size[0]//2-self.im_size[0]//4:self.im_size[0]//2+self.im_size[0]//4,
-              self.im_size[1]//2-self.im_size[1]//4:self.im_size[1]//2+self.im_size[1]//4]
-            output *= sensitivity_map
-            img[t, ph, :, :, :] = \
-                eo.reduce(
-                    torch.flip(output, (-1,)), 'ch slice w h -> slice w h', 'sum')
-        return img
+        sp = eo.parse_shape(kspace_data, 'contra_num phase_num ch slice_num spoke_num spoke_len')
+        t, ph = contrast, phase
+        # img = torch.zeros((len(self.slice_to_recon), self.im_size[0]//2, self.im_size[1]//2), dtype=torch.complex64)
+        # for t, ph in product(self.contra_to_recon, self.phase_to_recon):
+            # print('NUFFT for contrast:{}, phase:{}'.format(t, ph))
+        output = comp.batch_process(batch_size=2, device=self.device)(comp.recon_adjnufft)(
+            kspace_data[t, ph, :],  # , self.first_slice:args.last_slice],
+            kspace_traj=kspace_traj[t, ph],
+            kspace_density_compensation=kspace_density_compensation[t,ph],
+            adjnufft_ob=self.adjnufft_ob,
+        )[:, self.slice_to_recon, self.im_size[0]//2-self.im_size[0]//4:self.im_size[0]//2+self.im_size[0]//4,
+          self.im_size[1]//2-self.im_size[1]//4:self.im_size[1]//2+self.im_size[1]//4]
+        sensitivity_map = cse[t, ph].to(torch.complex64).conj()[
+            :, self.slice_to_recon]
+        # comp.normalization(output)
+        output *= sensitivity_map
+        img = \
+            eo.reduce(
+                torch.flip(output, (-1,)), 'ch slice w h -> slice w h', 'sum')
+        if not return_multi_channel:
+            return img
+        else:
+            img_multi_ch = output
+            return img, img_multi_ch
 
     def forward(self):
         data_raw = self.get_raw_data(self.dat_file_location)
