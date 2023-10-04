@@ -4,8 +4,8 @@ from sys import stdout
 import numpy as np
 from tqdm.auto import tqdm
 
-import mapvbvd as pkg
-from mapvbvd._attrdict import AttrDict
+# import . as pkg
+from ._attrdict import AttrDict
 from .read_twix_hdr import read_twix_hdr, twix_hdr
 from .twix_map_obj import twix_map_obj
 
@@ -292,8 +292,8 @@ def evalMDH(mdh_blob, version):
 
 
 def mapVBVD(filename, quiet=False, **kwargs):
-    if not quiet:
-        print(f'pymapVBVD version {pkg.__version__}')
+    # if not quiet:
+    #     print(f'pymapVBVD version {pkg.__version__}')
 
     # parse kw arguments
     # bReadImaScan = kwargs.get('bReadImaScan', True)
@@ -534,9 +534,8 @@ def mapVBVD(filename, quiet=False, **kwargs):
 
     fid.close()
 
-    if len(twix_obj) == 1:
-        twix_obj = twix_obj[0]
-    # breakpoint()
+    # if len(twix_obj) == 1:
+    #     twix_obj = twix_obj[0]
     return twix_obj, mdh_return
 
 

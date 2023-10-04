@@ -8,11 +8,12 @@ import torch.nn.functional as F
 from jax import numpy as np
 from tqdm import tqdm
 import einops as eo
+# from juliacall import Main as jl
+# jl.include("/data-local/anlab/Chunxu/mri_reconstruction_tools/src/mrboost/computation.jl")
 import torchkbnufft as tkbn
 
 from .io_utils import *
 from .twix_metadata_def import *
-from .torch_utils import jax_to_torch, torch_to_jax
 
 def batch_process(batch_size:int, device:torch.device, batch_dim = 0):
     def Inner(func):
@@ -87,7 +88,6 @@ def tuned_and_robust_estimation(navigator: np.ndarray, percentW: float, Fs, FOV,
     i_max, m_max = np.unravel_index(np.argmax(Q_np), Q_np.shape)
     # projection_max = projections[:, :, i_max]
     r_max = r[:, i_max, m_max].numpy(force=True)
-    
     # new quality metric block end
 
     #filter high frequency signal
@@ -112,23 +112,32 @@ def centralize_kspace(kspace_data, acquire_length, center_idx_in_acquire_lenth, 
     pad_length[dim*2+1], pad_length[dim*2] = front_padding, full_length-acquire_length-front_padding
     pad_length.reverse()
     # torch.nn.functional.pad() are using pad_lenth in a inverse way. (pad_front for axis -1,pad_back for axis -1, pad_front for axis -2, pad_back for axis-2 ......)
+    kspace_data_mask = torch.ones(kspace_data.shape,dtype=torch.bool)
+    kspace_data_mask = F.pad(kspace_data_mask, pad_length, mode='constant',value=False)
     kspace_data_ = F.pad(kspace_data, pad_length, mode='constant') # default constant is 0
-    return kspace_data_
+    
+    return kspace_data_, kspace_data_mask
 
-def ifft_1D(kspace_data,dim = -1):
-    return fftshift(ifft(ifftshift(kspace_data, dim=dim),dim=dim),dim=dim )
+def ifft_1D(kspace_data,dim = -1, norm= "ortho"):
+    return fftshift(ifft(ifftshift(kspace_data, dim=dim),dim=dim,norm = norm),dim=dim)
 
-def generate_golden_angle_radial_spokes_kspace_trajctory(spokes_num, spoke_length):
+def fft_1D(image_data,dim = -1, norm="ortho"):
+    return ifftshift(fft(fftshift(image_data, dim=dim),dim=dim, norm = norm),dim=dim)
+
+def generate_golden_angle_radial_spokes_kspace_trajectory(spokes_num, spoke_length):
     # create a k-space trajectory
-    KWIC_GOLDENANGLE = 180*(np.sqrt(5)-1)/2#111.246117975
+    KWIC_GOLDENANGLE = (np.sqrt(5)-1)/2 # = 111.246117975
+    # M_PI = 3.14159265358979323846
+    # KWIC_GOLDENANGLE = 111.246117975
     k = torch.linspace(-0.5, 0.5-1/spoke_length,spoke_length)
     k[spoke_length//2] = 0
-    A = torch.arange(spokes_num)*torch.pi*KWIC_GOLDENANGLE/180
+    A = torch.arange(spokes_num)*torch.pi*KWIC_GOLDENANGLE#/180
     kx = torch.outer(torch.cos(A),k)
     ky = torch.outer(torch.sin(A),k)
     ktraj = torch.stack((kx, ky), dim=0)
     return ktraj
 
+# %%
 def data_binning(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num, spokes_per_phase):
     spoke_len = data.shape[-1]
     output = eo.rearrange(
@@ -137,6 +146,7 @@ def data_binning(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num,
         t = contrast_num,
         spokes_per_contra = spokes_per_contra
         )
+    # print(output.shape, sorted_r_idx.shape)
     output = output.gather(
         dim=-2, 
         index = 
@@ -154,6 +164,30 @@ def data_binning(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num,
         spoke = spokes_per_phase)
     return output
 
+def data_binning_phase(data, sorted_r_idx, phase_num, spokes_per_phase):
+    spoke_len = data.shape[-1]
+    output = data.gather(
+        dim=-2, 
+        index = 
+        eo.repeat(
+            sorted_r_idx, 
+            'spoke -> spoke spoke_len',
+            spoke_len = spoke_len).expand_as(data)
+    )
+    output = eo.rearrange(
+        output, 
+        '...  (ph spoke) spoke_len -> ph ...  spoke spoke_len',
+        ph = phase_num,
+        spoke = spokes_per_phase)
+    return output
+
+# def data_binning_jl(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num, spokes_per_phase):
+#     jl.GC.enable(False)
+#     jl_output =  jl.data_binning(data.numpy(), sorted_r_idx.numpy(), contrast_num, spokes_per_contra, phase_num, spokes_per_phase)
+#     output = jl_output.to_numpy()
+#     jl.GC.enable(True)
+#     return torch.from_numpy(output)
+
 def recon_adjnufft(kspace_data, kspace_traj, kspace_density_compensation, adjnufft_ob):
     kspace_data = eo.rearrange(
         kspace_data*kspace_density_compensation,
@@ -162,7 +196,7 @@ def recon_adjnufft(kspace_data, kspace_traj, kspace_density_compensation, adjnuf
         kspace_traj,
         '... c spoke spoke_len -> ... c (spoke spoke_len)') # c stands for complex channel
     
-    img = adjnufft_ob.forward(kspace_data.contiguous(), kspace_traj,norm='ortho')
+    img = adjnufft_ob.forward(kspace_data.contiguous(), kspace_traj)
     img = eo.rearrange(img,'slice ch h w-> ch slice h w')
     return img
 
@@ -177,3 +211,28 @@ def polygon_area(vertices):
 
 def normalization(img):
     return (img-img.mean())/img.std()
+
+def normalization_root_of_sum_of_square(d, dim = 0):
+    ndims = len(d.shape)
+    dim_to_reduce = tuple([i for i in range(ndims) if i != dim])
+    k = torch.sqrt(torch.mean(d*d.conj(), dim = dim_to_reduce, keepdim = True)) 
+    # let the average of energy in each ksample point be 1
+    # print(k)
+    # print((d**2).mean())
+    # print(((d/k)**2).mean())
+    return d/k
+
+### test
+# %%
+# def data_binning_test():
+#     data = torch.rand((15,80,2550,640))
+#     spokes_per_contra = 75
+#     phase_num = 5
+#     spokes_per_phase = 15
+#     contrast_num = 34
+#     sorted_r_idx = torch.stack([ torch.randperm(spokes_per_contra) for i in range(contrast_num) ])
+#     o = data_binning_jl(data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num, spokes_per_phase)
+#     return o.shape
+    # jl.data_binning(jl.Array(data.numpy()), jl.Array(sorted_r_idx.numpy()), contrast_num, spokes_per_contra, phase_num, spokes_per_phase)
+# print(data_binning_test())
+

@@ -1,3 +1,4 @@
+from genericpath import exists
 import os
 import re
 import time
@@ -14,6 +15,8 @@ from tqdm import tqdm
 from struct import pack
 import nibabel as nib
 import h5py
+import matplotlib.pyplot as plt
+import torchvision.transforms.functional as vF
 
 from .twix_metadata_def import *
 
@@ -287,13 +290,19 @@ def read_analyze_format(path):
 
 def check_mk_dirs(paths):
     if isinstance(paths, list):
+        existance = []
         for path in paths:
             if not os.path.exists(path):
                 os.makedirs(path)
+                existance.append(False)
+            else:
+                existance.append(True)
     else:
         if not os.path.exists(paths):
             os.makedirs(paths)
-    return paths
+            return False
+        else:
+            return True
 
 
 def to_nifty(img,output_path,affine=torch.eye(4,dtype=torch.float32)):
@@ -359,6 +368,22 @@ def calculate_time(func):
         print("Total time taken in : ", func.__name__, end - begin)
     return inner1
 
+def plot(imgs, **imshow_kwargs):
+    if not isinstance(imgs[0], list):
+        # Make a 2d grid even if there's just 1 row
+        imgs = [imgs]
+
+    num_rows = len(imgs)
+    num_cols = len(imgs[0])
+    _, axs = plt.subplots(nrows=num_rows, ncols=num_cols, squeeze=False)
+    for row_idx, row in enumerate(imgs):
+        for col_idx, img in enumerate(row):
+            ax = axs[row_idx, col_idx]
+            img = vF.to_pil_image(img.to("cpu"))
+            ax.imshow(np.asarray(img), **imshow_kwargs)
+            ax.set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+
+    plt.tight_layout()
 
 # def from_label_to_onehot(labels,num_classes):
 #     one_hot = torch.zeros(labels.size(0), num_classes, labels.size(2), labels.size(3),labels.size(4)).to(labels.device)

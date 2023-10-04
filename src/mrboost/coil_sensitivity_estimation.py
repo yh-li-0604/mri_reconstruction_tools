@@ -6,15 +6,22 @@ import einops as eo
 import torchkbnufft as tkbn
 
 from . import computation as comp
-from .density_compensation import cihat_pipe_density_compensation,pipe_density_compensation
+from .density_compensation import cihat_pipe_density_compensation, pipe_density_compensation
 from .torch_utils import center_crop
 
-fft  = lambda x, ax : np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(x, axes=ax), axes=ax, norm='ortho'), axes=ax) 
-ifft = lambda X, ax : np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(X, axes=ax), axes=ax, norm='ortho'), axes=ax) 
+
+def fft(x, ax): return np.fft.fftshift(np.fft.fftn(
+    np.fft.ifftshift(x, axes=ax), axes=ax, norm='ortho'), axes=ax)
+
+
+def ifft(X, ax): return np.fft.fftshift(np.fft.ifftn(
+    np.fft.ifftshift(X, axes=ax), axes=ax, norm='ortho'), axes=ax)
+
 
 def lowk_xy(kspace_data, kspace_traj, adjnufft_ob, hamming_filter_ratio=0.05, batch_size=2, device=torch.device('cpu')):
     spoke_len = kspace_data.shape[-1]
-    W = comp.hamming_filter(nonzero_width_percent=hamming_filter_ratio, width=spoke_len)
+    W = comp.hamming_filter(
+        nonzero_width_percent=hamming_filter_ratio, width=spoke_len)
     spoke_lowpass_filter_xy = torch.from_numpy(W)
 
     @comp.batch_process(batch_size=batch_size, device=device, batch_dim=0)
@@ -22,12 +29,12 @@ def lowk_xy(kspace_data, kspace_traj, adjnufft_ob, hamming_filter_ratio=0.05, ba
         kspace_data = filter*kspace_data
         kspace_data = comp.ifft_1D(kspace_data, dim=1)
         # TODO why we need flip?
-        kspace_data = torch.flip(kspace_data, dims=(1,))
+        # kspace_data = torch.flip(kspace_data, dims=(1,))
         kspace_data = kspace_data/kspace_data.abs().max()
         kspace_data = eo.rearrange(
             kspace_data, 'ch_num slice_num spoke_num spoke_len -> slice_num ch_num (spoke_num spoke_len)').contiguous()
         # interp_mats = tkbn.calc_tensor_spmatrix(ktraj,im_size=adjnufft_ob.im_size.numpy(force=True))
-        img_dc = adjnufft_ob.forward(kspace_data, ktraj,norm='ortho')
+        img_dc = adjnufft_ob.forward(kspace_data, ktraj, norm='ortho')
         img_dc = eo.rearrange(
             img_dc, 'slice_num ch_num h w -> ch_num slice_num h w')
         # print(img_dc.shape)
@@ -37,26 +44,29 @@ def lowk_xy(kspace_data, kspace_traj, adjnufft_ob, hamming_filter_ratio=0.05, ba
         kspace_data,
         filter=spoke_lowpass_filter_xy,
         ktraj=eo.rearrange(kspace_traj, 'c spoke_num spoke_len -> c (spoke_num spoke_len)'),)
-    
-    coil_sens = coil_sens[:,:,spoke_len//2-spoke_len//4:spoke_len//2+spoke_len//4,spoke_len//2-spoke_len//4:spoke_len//2+spoke_len//4]
+
+    coil_sens = coil_sens[:, :, spoke_len//2-spoke_len//4:spoke_len//2 +
+                          spoke_len//4, spoke_len//2-spoke_len//4:spoke_len//2+spoke_len//4]
     # coil_sens = torch.from_numpy(coil_sens)
     img_sens_SOS = torch.sqrt(
         eo.reduce(
-            coil_sens.abs()**2, 
-            'ch_num slice_num height width -> () slice_num height width', 'sum'))
+            coil_sens.abs()**2,
+            'ch_num slice_num height width -> () slice_num height width', 'mean'))
     coil_sens = coil_sens/img_sens_SOS
-    coil_sens[torch.isnan(coil_sens)] = 0 # optional
-    coil_sens /= coil_sens.abs().max()
-    return coil_sens 
+    coil_sens[torch.isnan(coil_sens)] = 0  # optional
+    # coil_sens /= coil_sens.abs().max()
+    return coil_sens
 
 
-def lowk_xyz(kspace_data, kspace_traj,  adjnufft_ob, hamming_filter_ratio=[0.05,0.2], batch_size=2, device=torch.device('cpu'), **kwargs):
+def lowk_xyz(kspace_data, kspace_traj,  adjnufft_ob, hamming_filter_ratio=[0.05, 0.2], batch_size=2, device=torch.device('cpu'), **kwargs):
     # "need to be used before kspace z axis ifft"
     spoke_len = kspace_data.shape[-1]
     slice_num = kspace_data.shape[1]
-    W = comp.hamming_filter(nonzero_width_percent=hamming_filter_ratio[0], width=spoke_len)
+    W = comp.hamming_filter(
+        nonzero_width_percent=hamming_filter_ratio[0], width=spoke_len)
     spoke_lowpass_filter_xy = torch.from_numpy(W)
-    Wz = comp.hamming_filter(nonzero_width_percent=hamming_filter_ratio[1], width=slice_num)
+    Wz = comp.hamming_filter(
+        nonzero_width_percent=hamming_filter_ratio[1], width=slice_num)
     spoke_lowpass_filter_z = torch.from_numpy(Wz)
 
     @comp.batch_process(batch_size=batch_size, device=device)
@@ -65,7 +75,7 @@ def lowk_xyz(kspace_data, kspace_traj,  adjnufft_ob, hamming_filter_ratio=[0.05,
         kspace_data = eo.einsum(filter_z, kspace_data, 'b, a b c d -> a b c d')
         kspace_data = comp.ifft_1D(kspace_data, dim=1)
         # TODO why we need flip?
-        kspace_data = torch.flip(kspace_data, dims=(1,))
+        # kspace_data = torch.flip(kspace_data, dims=(1,))
         kspace_data = kspace_data/kspace_data.abs().max()
         kspace_data = eo.rearrange(
             kspace_data, 'ch_num slice_num spoke_num spoke_len -> slice_num ch_num (spoke_num spoke_len)').contiguous()
@@ -78,12 +88,13 @@ def lowk_xyz(kspace_data, kspace_traj,  adjnufft_ob, hamming_filter_ratio=[0.05,
         kspace_data,
         filter_xy=spoke_lowpass_filter_xy, filter_z=spoke_lowpass_filter_z,
         ktraj=eo.rearrange(kspace_traj, 'c spoke_num spoke_len -> c (spoke_num spoke_len)'),)
-    coil_sens = coil_sens[:,:,spoke_len//2-spoke_len//4:spoke_len//2+spoke_len//4,spoke_len//2-spoke_len//4:spoke_len//2+spoke_len//4]
+    coil_sens = coil_sens[:, :, spoke_len//2-spoke_len//4:spoke_len//2 +
+                          spoke_len//4, spoke_len//2-spoke_len//4:spoke_len//2+spoke_len//4]
     img_sens_SOS = torch.sqrt(eo.reduce(coil_sens.abs(
-    )**2, 'ch_num slice_num height width -> () slice_num height width', 'sum'))
+    )**2, 'ch_num slice_num height width -> () slice_num height width', 'mean'))
     coil_sens = coil_sens/img_sens_SOS
-    coil_sens[torch.isnan(coil_sens)] = 0 # optional
-    coil_sens /= coil_sens.abs().max()
+    coil_sens[torch.isnan(coil_sens)] = 0  # optional
+    # coil_sens /= coil_sens.abs().max()
     return coil_sens
 
 
@@ -114,7 +125,7 @@ def espirit_cartesian(X, k, r, t, c):
     syt = (sy//2-r//2, sy//2+r//2) if (sy > 1) else (0, 1)
     szt = (sz//2-r//2, sz//2+r//2) if (sz > 1) else (0, 1)
 
-    # Extract calibration region.    
+    # Extract calibration region.
     C = X[sxt[0]:sxt[1], syt[0]:syt[1], szt[0]:szt[1], :].astype(np.complex64)
 
     # Construct Hankel matrix.
@@ -126,7 +137,7 @@ def espirit_cartesian(X, k, r, t, c):
       for ydx in range(max(1, C.shape[1] - k + 1)):
         for zdx in range(max(1, C.shape[2] - k + 1)):
           # numpy handles when the indices are too big
-          block = C[xdx:xdx+k, ydx:ydx+k, zdx:zdx+k, :].astype(np.complex64) 
+          block = C[xdx:xdx+k, ydx:ydx+k, zdx:zdx+k, :].astype(np.complex64)
           A[idx, :] = block.flatten()
           idx = idx + 1
 
@@ -144,9 +155,11 @@ def espirit_cartesian(X, k, r, t, c):
 
     # Reshape into k-space kernel, flips it and takes the conjugate
     kernels = np.zeros(np.append(np.shape(X), n)).astype(np.complex64)
-    kerdims = [(sx > 1) * k + (sx == 1) * 1, (sy > 1) * k + (sy == 1) * 1, (sz > 1) * k + (sz == 1) * 1, nc]
+    kerdims = [(sx > 1) * k + (sx == 1) * 1, (sy > 1) * k +
+               (sy == 1) * 1, (sz > 1) * k + (sz == 1) * 1, nc]
     for idx in range(n):
-        kernels[kxt[0]:kxt[1],kyt[0]:kyt[1],kzt[0]:kzt[1], :, idx] = np.reshape(V[:, idx], kerdims)
+        kernels[kxt[0]:kxt[1], kyt[0]:kyt[1], kzt[0]:kzt[1],
+                :, idx] = np.reshape(V[:, idx], kerdims)
 
     # Take the iucfft
     axes = (0, 1, 2)
@@ -154,7 +167,8 @@ def espirit_cartesian(X, k, r, t, c):
     for idx in range(n):
         for jdx in range(nc):
             ker = kernels[::-1, ::-1, ::-1, jdx, idx].conj()
-            kerimgs[:,:,:,jdx,idx] = fft(ker, axes) * np.sqrt(sx * sy * sz)/np.sqrt(k**p)
+            kerimgs[:, :, :, jdx, idx] = fft(
+                ker, axes) * np.sqrt(sx * sy * sz)/np.sqrt(k**p)
 
     # Take the point-wise eigenvalue decomposition and keep eigenvalues greater than c
     maps = np.zeros(np.append(np.shape(X), nc)).astype(np.complex64)
@@ -162,7 +176,7 @@ def espirit_cartesian(X, k, r, t, c):
         for jdx in range(0, sy):
             for kdx in range(0, sz):
 
-                Gq = kerimgs[idx,jdx,kdx,:,:]
+                Gq = kerimgs[idx, jdx, kdx, :, :]
 
                 u, s, vh = np.linalg.svd(Gq, full_matrices=True)
                 for ldx in range(0, nc):
@@ -170,6 +184,7 @@ def espirit_cartesian(X, k, r, t, c):
                         maps[idx, jdx, kdx, :, ldx] = u[:, ldx]
 
     return maps
+
 
 def espirit_proj(x, esp):
     """
@@ -189,11 +204,13 @@ def espirit_proj(x, esp):
     proj = np.zeros(x.shape).astype(np.complex64)
     for qdx in range(0, esp.shape[4]):
         for pdx in range(0, esp.shape[3]):
-            ip[:, :, :, qdx] = ip[:, :, :, qdx] + x[:, :, :, pdx] * esp[:, :, :, pdx, qdx].conj()
+            ip[:, :, :, qdx] = ip[:, :, :, qdx] + \
+                x[:, :, :, pdx] * esp[:, :, :, pdx, qdx].conj()
 
     for qdx in range(0, esp.shape[4]):
         for pdx in range(0, esp.shape[3]):
-          proj[:, :, :, pdx] = proj[:, :, :, pdx] + ip[:, :, :, qdx] * esp[:, :, :, pdx, qdx]
+          proj[:, :, :, pdx] = proj[:, :, :, pdx] + \
+              ip[:, :, :, qdx] * esp[:, :, :, pdx, qdx]
 
     return (ip, proj, x - proj)
 
@@ -219,9 +236,11 @@ class Lowk_CSE(CoilSensitivityEstimator):
 
 
 class Lowk_2D_CSE(Lowk_CSE):
-    def __init__(self, kspace_data, kspace_traj,nufft_ob, adjnufft_ob, hamming_filter_ratio=0.05, batch_size=2, device=torch.device('cpu')) -> None:
-        super().__init__(kspace_data, kspace_traj,nufft_ob, adjnufft_ob, hamming_filter_ratio, batch_size, device)
-        kspace_density_compensation_ = cihat_pipe_density_compensation(kspace_traj, nufft_ob,adjnufft_ob, device=self.device)
+    def __init__(self, kspace_data, kspace_traj, nufft_ob, adjnufft_ob, hamming_filter_ratio=0.05, batch_size=2, device=torch.device('cpu')) -> None:
+        super().__init__(kspace_data, kspace_traj, nufft_ob,
+                         adjnufft_ob, hamming_filter_ratio, batch_size, device)
+        kspace_density_compensation_ = cihat_pipe_density_compensation(
+            kspace_traj, nufft_ob, adjnufft_ob, device=self.device)
         self.coil_sens = lowk_xy(
             kspace_data*kspace_density_compensation_, kspace_traj, adjnufft_ob, hamming_filter_ratio, batch_size=batch_size, device=device)
 
@@ -229,12 +248,15 @@ class Lowk_2D_CSE(Lowk_CSE):
         current_contrast = key[0]
         current_phase = key[1]
         return super().__getitem__(key[2:])
+        # return self.coil_sens[key[2:]]
 
 
 class Lowk_3D_CSE(Lowk_CSE):
-    def __init__(self, kspace_data, kspace_traj,nufft_ob, adjnufft_ob, hamming_filter_ratio=[0.05,0.5], batch_size=2, device=torch.device('cpu')) -> None:
-        super().__init__(kspace_data, kspace_traj,nufft_ob, adjnufft_ob, hamming_filter_ratio, batch_size, device)
-        kspace_density_compensation_ = cihat_pipe_density_compensation(kspace_traj, nufft_ob,adjnufft_ob, device=self.device)
+    def __init__(self, kspace_data, kspace_traj, nufft_ob, adjnufft_ob, hamming_filter_ratio=[0.05, 0.5], batch_size=2, device=torch.device('cpu')) -> None:
+        super().__init__(kspace_data, kspace_traj, nufft_ob,
+                         adjnufft_ob, hamming_filter_ratio, batch_size, device)
+        kspace_density_compensation_ = cihat_pipe_density_compensation(
+            kspace_traj, nufft_ob, adjnufft_ob, device=self.device)
         self.coil_sens = lowk_xyz(
             kspace_data*kspace_density_compensation_, kspace_traj, adjnufft_ob, hamming_filter_ratio, batch_size=batch_size, device=device)
 
@@ -243,8 +265,9 @@ class Lowk_3D_CSE(Lowk_CSE):
 
 
 class Lowk_5D_CSE(Lowk_CSE):
-    def __init__(self, kspace_data, kspace_traj, nufft_ob, adjnufft_ob, args, hamming_filter_ratio=[0.05,0.5], batch_size=2, device=torch.device('cpu')) -> None:
-        super().__init__(kspace_data, kspace_traj,nufft_ob, adjnufft_ob, hamming_filter_ratio, batch_size, device)
+    def __init__(self, kspace_data, kspace_traj, nufft_ob, adjnufft_ob, args, hamming_filter_ratio=[0.05, 0.5], batch_size=2, device=torch.device('cpu')) -> None:
+        super().__init__(kspace_data, kspace_traj, nufft_ob,
+                         adjnufft_ob, hamming_filter_ratio, batch_size, device)
         self.kspace_traj,  self.kspace_data = map(
             comp.data_binning,
             [kspace_traj,  kspace_data],
@@ -257,16 +280,17 @@ class Lowk_5D_CSE(Lowk_CSE):
         current_contrast = key[0]
         current_phase = key[1]
         kspace_traj = self.kspace_traj[current_contrast, current_phase]
-        kspace_density_compensation_ = cihat_pipe_density_compensation(kspace_traj, self.nufft_ob,self.adjnufft_ob, device=self.device)
+        kspace_density_compensation_ = cihat_pipe_density_compensation(
+            kspace_traj, self.nufft_ob, self.adjnufft_ob, device=self.device)
         return lowk_xyz(self.kspace_data[current_contrast, current_phase]*kspace_density_compensation_,
-            kspace_traj, self.adjnufft_ob, self.hamming_filter_ratio, 
-            batch_size=self.batch_size, device=self.device)
+                        kspace_traj, self.adjnufft_ob, self.hamming_filter_ratio,
+                        batch_size=self.batch_size, device=self.device)
 
 
 class ESPIRIT(CoilSensitivityEstimator):
     def __init__(self, kspace_data, kspace_traj, batch_size, device) -> None:
         super().__init__(kspace_data, kspace_traj, batch_size, device)
-        
+
     def __getitem__(self, key):
         return super().__getitem__(key)
 
@@ -306,7 +330,7 @@ class ESPIRIT(CoilSensitivityEstimator):
 
 #         # kspace density compensation
 #         kspace_density_compensation = pipe_density_compensation(kspace_traj, im_size)
-        
+
 #         # we need only the center of k-space, which we have fully samples during scanning
 #         center_crop_shape = [ num_coils, 2*calib_width[0],shape_dict['spoke_num'],2*calib_width[2]]
 #         kspace_data = center_crop(kspace_data*kspace_density_compensation,center_crop_shape)
@@ -330,7 +354,7 @@ class ESPIRIT(CoilSensitivityEstimator):
 #         kspace_data_cartesian = torch.fft.ifftshift(kspace_interp_ob(kspace_data,kspace_traj),[-1,-2])
 #         kspace_data_cartesian = eo.rearrange(
 #             kspace_data_cartesian, 'slice_num ch_num h w -> ch_num slice_num h w')
-        
+
 #         # print(kspace_data_cartesian)
 #         from matplotlib import pyplot as plt
 #         plt.imshow(torch.abs(kspace_data_cartesian[0,5]),vmin=0,vmax=0.5)
@@ -412,7 +436,7 @@ class ESPIRIT(CoilSensitivityEstimator):
 #             return mps, max_eig
 #         else:
 #             return mps
-    
+
 #     def __getitem__(self, key):
 #         current_contrast = key[0]
 #         current_phase = key[1]

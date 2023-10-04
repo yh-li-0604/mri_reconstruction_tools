@@ -4,7 +4,6 @@ import numpy as np
 import torch
 import einops as eo
 import torchkbnufft as tkbn
-from pipe import Pipe
 from scipy.spatial import Voronoi
 from toolz.functoolz import curry, pipe
 # import taichi as ti
