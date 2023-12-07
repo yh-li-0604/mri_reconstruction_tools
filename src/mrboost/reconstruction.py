@@ -419,7 +419,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
                      kspace_data_z=kspace_data_z, kspace_traj=kspace_traj, 
                      kspace_density_compensation = kspace_density_compensation, cse=cse)
 
-    def navigator_preprocess(self, nav):
+    def navigator_preprocess(self, nav, return_respiratory_curve=False):
         ch, rotation, respiratory_curve = comp.tuned_and_robust_estimation(
             navigator=nav, percentW=self.percentW, Fs=self.Fs, FOV=self.FOV, ndata=self.spoke_len,device=self.device)
         # here rotation is index of 100 different degree, to get same with cihat, please+1
@@ -433,7 +433,10 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         sorted_r, sorted_r_idx = torch.sort(
             respiratory_curve_contrast, dim=-1)
         # in each of the contrast, we sort the respiratory curve in order to classify respiratory phases
-        return sorted_r_idx
+        if return_respiratory_curve:
+            return sorted_r, sorted_r_idx, respiratory_curve
+        else:
+            return sorted_r_idx
 
     def kspace_data_preprocess(self, kspace_data_raw):
         kspace_data_centralized, kspace_data_mask = comp.centralize_kspace(
