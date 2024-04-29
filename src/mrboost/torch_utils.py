@@ -1,9 +1,11 @@
-import torch
 from typing import Tuple
+
 import jax
 import jax.numpy as jnp
+import torch
 from jax import dlpack as dlpack_jax
 from torch.utils import dlpack as dlpack_torch
+
 # def unravel_index(
 #     indices: torch.LongTensor,
 #     shape: Tuple[int, ...],
@@ -30,8 +32,9 @@ from torch.utils import dlpack as dlpack_torch
 
 #     return coord
 
+
 def center_crop(input_tensor, oshape):
-    ishape = input_tensor.shape 
+    ishape = input_tensor.shape
     ishift = [max(i // 2 - o // 2, 0) for i, o in zip(ishape, oshape)]
     # oshift = [max(o // 2 - i // 2, 0) for i, o in zip(ishape, oshape)]
     # copy_shape = [i-si for i, si in zip(ishape, ishift)]
@@ -39,23 +42,27 @@ def center_crop(input_tensor, oshape):
     output = input_tensor[islice]
     return output
 
-def jax_to_torch(input,take_ownership=True):
-    return dlpack_torch.from_dlpack(dlpack_jax.to_dlpack(input,take_ownership))
+
+def jax_to_torch(input):
+    return dlpack_torch.from_dlpack(dlpack_jax.to_dlpack(input))
+
 
 def torch_to_jax(input):
     return dlpack_jax.from_dlpack(dlpack_torch.to_dlpack(input))
+
 
 @jax.jit
 def as_real(x):
     if not jnp.issubdtype(x.dtype, jnp.complexfloating):
         return x
 
-    xr = jnp.zeros(x.shape+(2,), dtype=x.real.dtype)
-    xr = xr.at[...,0].set(x.real)
-    xr = xr.at[...,1].set(x.imag)
+    xr = jnp.zeros(x.shape + (2,), dtype=x.real.dtype)
+    xr = xr.at[..., 0].set(x.real)
+    xr = xr.at[..., 1].set(x.imag)
     return xr
+
 
 @jax.jit
 def as_complex(x):
-   assert x.shape[-1] == 2
-   return jax.lax.complex(x[...,0], x[...,1])
+    assert x.shape[-1] == 2
+    return jax.lax.complex(x[..., 0], x[..., 1])

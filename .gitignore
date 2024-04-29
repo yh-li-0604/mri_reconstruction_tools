@@ -9,5 +9,7 @@
 /results
 /tests
 /ToolsForRecon
+/.venv
 
 **/__pycache__
+**/.pytest_cache

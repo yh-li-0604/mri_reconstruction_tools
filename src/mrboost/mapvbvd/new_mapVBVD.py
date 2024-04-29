@@ -4,8 +4,8 @@ from sys import stdout, version_info
 import numpy as np
 from tqdm.auto import tqdm
 
-import mrboost.mapvbvd as pkg
-from mrboost.mapvbvd._attrdict import AttrDict
+import mapvbvd as pkg
+from mapvbvd._attrdict import AttrDict
 
 from .read_twix_hdr import read_twix_hdr, twix_hdr
 from .twix_map_obj import twix_map_obj
@@ -464,7 +464,6 @@ def mapVBVD(filename, quiet=False, **kwargs):
             isCurrScan = mask.MDH_IMASCAN.astype(bool)
             if isCurrScan.any():
                 currTwixObj.image.readMDH(mdh, filePos, isCurrScan)
-                mdh_return = mdh
             else:
                 currTwixObj.pop("image", None)
 
@@ -472,7 +471,6 @@ def mapVBVD(filename, quiet=False, **kwargs):
             isCurrScan = mask.MDH_NOISEADJSCAN.astype(bool)
             if isCurrScan.any():
                 currTwixObj.noise.readMDH(mdh, filePos, isCurrScan)
-                mdh_return = mdh
             else:
                 currTwixObj.pop("noise", None)
 
@@ -599,9 +597,11 @@ def mapVBVD(filename, quiet=False, **kwargs):
         twix_obj.append(myAttrDict(currTwixObj))
 
     fid.close()
-    # if len(twix_obj) == 1:
-    #     twix_obj = twix_obj[0]
-    return twix_obj, mdh_return
+
+    if len(twix_obj) == 1:
+        twix_obj = twix_obj[0]
+    # breakpoint()
+    return twix_obj
 
 
 # Add some class methods to AttrDict so that we get around the issue of not being able to

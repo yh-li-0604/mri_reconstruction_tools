@@ -8,14 +8,12 @@ from itertools import chain
 from pathlib import Path
 from typing import List
 
-import einops as eo
 import h5py
 import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
 import pydicom
 import torch
-import torch.nn.functional as F
 import torchvision.transforms.functional as vF
 import zarr
 from tqdm import tqdm
@@ -76,7 +74,6 @@ def read_scan_meta_data(datFileLocation, currentPosition, shape_dict):
             datFileLocation, int(currentPosition)
         )
         start_pos = currentPosition
-        # TODO why this? ask cihat
         DMAlength = acquisition_data["DMAlen1"] + acquisition_data["DMAlen2"] * 65536
         aulEvalInfoMask = acquisition_data["aulEvalInfoMask"]
         mdh = determine_bitfields(aulEvalInfoMask)  # ,aulEvalInfoMaskLeastSig)
@@ -322,11 +319,13 @@ def check_mk_dirs(paths):
         else:
             return True
 
+
 @singledispatch
-def to_nifty(img, output_path, affine = torch.eye(4, dtype=torch.float32)):
+def to_nifty(img, output_path, affine=torch.eye(4, dtype=torch.float32)):
     nifty_image = nib.Nifti1Image(img, affine)
     nib.save(nifty_image, output_path)
     print("Writed to: ", output_path)
+
 
 @to_nifty.register
 def _(img: torch.Tensor, output_path, affine=torch.eye(4, dtype=torch.float32)):
@@ -334,11 +333,13 @@ def _(img: torch.Tensor, output_path, affine=torch.eye(4, dtype=torch.float32)):
     nib.save(nifty_image, output_path)
     print("Writed to: ", output_path)
 
+
 @to_nifty.register
 def _(img: np.ndarray, output_path, affine=torch.eye(4, dtype=torch.float32)):
     nifty_image = nib.Nifti1Image(img, affine)
     nib.save(nifty_image, output_path)
     print("Writed to: ", output_path)
+
 
 def to_hdf5(
     img,
@@ -425,8 +426,14 @@ def plot(imgs, **imshow_kwargs):
 
     plt.tight_layout()
 
-def to_dicom(img, ref_folder = "/data/anlab/Chunxu/RawData_MR/CCIR_01168_ONC-DCE/ONC-DCE-004/scans", output_path = "/data/anlab/Chunxu/RawData_MR/CCIR_01168_ONC-DCE/ONC-DCE-004/scans/MOTIF_CORD", dicom_header = None):
-    fileList = glob(os.path.join(ref_folder, '*.dcm'))
+
+def to_dicom(
+    img,
+    ref_folder="/data/anlab/Chunxu/RawData_MR/CCIR_01168_ONC-DCE/ONC-DCE-004/scans",
+    output_path="/data/anlab/Chunxu/RawData_MR/CCIR_01168_ONC-DCE/ONC-DCE-004/scans/MOTIF_CORD",
+    dicom_header=None,
+):
+    fileList = glob(os.path.join(ref_folder, "*.dcm"))
     dicom_list = [pydicom.dcmread(f) for f in fileList]
     dicom_list.sort(key=lambda x: float(x.SliceLocation))
 
@@ -435,42 +442,53 @@ def to_dicom(img, ref_folder = "/data/anlab/Chunxu/RawData_MR/CCIR_01168_ONC-DCE
     for header in dicom_list:
         tempHeaderMR = deepcopy(header)
         tempHeaderMR.SeriesDescription = dicom_header["SeriesDescription"]
-        tempHeaderMR.SeriesInstanceUID = pydicom.uid.generate_uid(entropy_srcs = dicom_header["SeriesInstanceUID"])
+        tempHeaderMR.SeriesInstanceUID = pydicom.uid.generate_uid(
+            entropy_srcs=dicom_header["SeriesInstanceUID"]
+        )
         headerStackMR.append(tempHeaderMR)
 
     os.makedirs(output_path, exist_ok=True)
-    img_ = img[4:76,:, :]
+    img_ = img[4:76, :, :]
     k = dicom_header["FrameReferenceTime"]
-    for n, header, img_slice in zip(range(img_.shape[0]),headerStackMR,img_):
+    for n, header, img_slice in zip(range(img_.shape[0]), headerStackMR, img_):
         header.FrameReferenceTime = str(k)
-        uid = pydicom.uid.generate_uid(entropy_srcs = dicom_header["SeriesInstanceUID"]+[f"contrast_{k}_slice_{n}"])
+        uid = pydicom.uid.generate_uid(
+            entropy_srcs=dicom_header["SeriesInstanceUID"] + [f"contrast_{k}_slice_{n}"]
+        )
         header.SOPInstanceUID = uid
         header.file_meta.MediaStorageSOPInstanceUID = uid
         header.PixelData = img_slice.tobytes()
-        pydicom.dcmwrite(Path(output_path)/f'{uid}.dcm', header)
+        pydicom.dcmwrite(Path(output_path) / f"{uid}.dcm", header)
 
 
-def liver_DCE_zarr_to_dicom(img_path_list, ref_folder, output_path, method="MCNUFFT_Contrast_34_10s"):
+def liver_DCE_zarr_to_dicom(
+    img_path_list, ref_folder, output_path, method="MCNUFFT_Contrast_34_10s"
+):
     max_d = 0
     img_list = []
     for img_path in img_path_list:
-        d = zarr.open(img_path, mode='r')
+        d = zarr.open(img_path, mode="r")
         current_d = np.nanpercentile(d, 99.8)
         if current_d > max_d:
             max_d = current_d
         img_list.append(d)
-        
+
     for img, img_path in zip(img_list, img_path_list):
         k = Path(img_path).stem
         pid = Path(img_path).parent.stem
         header = dict(
             SeriesDescription=method,
-            SeriesInstanceUID=[pid, method], # serves as entropy source to generate UID
+            SeriesInstanceUID=[pid, method],  # serves as entropy source to generate UID
             FrameReferenceTime=k,
         )
-        #normalize array img to the size of uint16
-        img_uint16 = (np.clip(img,0, max_d)*(4095/max_d)).astype(np.uint16)
-        to_dicom(np.swapaxes(np.flip(img_uint16, (0, 2)),1,2), ref_folder = ref_folder, output_path = output_path, dicom_header=header)
+        # normalize array img to the size of uint16
+        img_uint16 = (np.clip(img, 0, max_d) * (4095 / max_d)).astype(np.uint16)
+        to_dicom(
+            np.swapaxes(np.flip(img_uint16, (0, 2)), 1, 2),
+            ref_folder=ref_folder,
+            output_path=output_path,
+            dicom_header=header,
+        )
         # break
 
 
