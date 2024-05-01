@@ -18,9 +18,9 @@ dependencies = [
     "torchkbnufft>=1.4.0",
     "xarray>=2024.3.0",
     "jax[cpu]>=0.4.26",
-    "cufinufft>=2.2.0",
     "fire>=0.6.0",
     "torch>=2.3.0",
+    "pytorch-finufft @ git+https://github.com/flatironinstitute/pytorch-finufft.git",
 ]
 readme = "README.md"
 requires-python = ">= 3.8"
