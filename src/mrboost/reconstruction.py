@@ -1,6 +1,6 @@
 # %%
 from dataclasses import dataclass, field
-from itertools import islice, product
+from itertools import product
 from typing import Any, Callable, Dict, Optional, Sequence, Type, Union
 
 import einx
@@ -8,16 +8,13 @@ import numpy as np
 import scipy.io as sio
 import torch
 import torchkbnufft as tkbn
-import xarray as xr
 from einops import parse_shape
 
 # from icecream import ic
 from plum import dispatch, overload
 
 from mrboost import computation as comp
-from mrboost import preprocessing as pre
 from mrboost.coil_sensitivity_estimation import (
-    CoilSensitivityEstimator,
     Lowk_2D_CSE,
     Lowk_3D_CSE,
     get_csm_lowk_xy,

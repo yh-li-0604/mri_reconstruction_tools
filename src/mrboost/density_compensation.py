@@ -1,4 +1,3 @@
-from dataclasses import field
 from typing import Optional, Sequence
 
 import einops as eo
@@ -18,9 +17,8 @@ from dlboost.utils.type_utils import (
 )
 
 # from icecream import ic
-# import taichi as ti
-from jax import jit, pmap, vmap
-from jax.tree_util import tree_map, tree_structure
+from jax import jit
+from jax.tree_util import tree_map
 from plum import dispatch, overload
 from scipy.spatial import Voronoi
 
