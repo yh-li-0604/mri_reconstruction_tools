@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 import torch
 import torchkbnufft as tkbn
-from dlboost.utils.type_utils import (
+from .type_utils import (
     ComplexImage2D,
     ComplexImage3D,
     KspaceData,

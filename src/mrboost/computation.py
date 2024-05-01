@@ -8,7 +8,7 @@ import einx
 import scipy
 import torch
 import torch.nn.functional as F
-from dlboost.utils.type_utils import (
+from .type_utils import (
     ComplexImage2D,
     ComplexImage3D,
     KspaceData,
