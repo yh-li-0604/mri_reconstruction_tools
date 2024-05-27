@@ -14,7 +14,6 @@ import nibabel as nib
 import numpy as np
 import pydicom
 import torch
-import torchvision.transforms.functional as vF
 import zarr
 from tqdm import tqdm
 
@@ -420,7 +419,7 @@ def plot(imgs, **imshow_kwargs):
     for row_idx, row in enumerate(imgs):
         for col_idx, img in enumerate(row):
             ax = axs[row_idx, col_idx]
-            img = vF.to_pil_image(img.to("cpu"))
+            img = img.to("cpu")
             ax.imshow(np.asarray(img), **imshow_kwargs)
             ax.set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
 
