@@ -10,6 +10,10 @@
 -e file:.
 asciitree==0.3.3
     # via zarr
+contourpy==1.2.1
+    # via matplotlib
+cycler==0.12.1
+    # via matplotlib
 einops==0.8.0
     # via mrboost
 fasteners==0.19
@@ -20,6 +24,8 @@ finufft==2.2.0
     # via pytorch-finufft
 fire==0.6.0
     # via mrboost
+fonttools==4.52.1
+    # via matplotlib
 fsspec==2024.3.1
     # via torch
 h5py==3.11.0
@@ -30,8 +36,12 @@ jaxlib==0.4.26
     # via jax
 jinja2==3.1.3
     # via torch
+kiwisolver==1.4.5
+    # via matplotlib
 markupsafe==2.1.5
     # via jinja2
+matplotlib==3.9.0
+    # via mrboost
 ml-dtypes==0.4.0
     # via jax
     # via jaxlib
@@ -44,10 +54,12 @@ nibabel==5.2.1
 numcodecs==0.12.1
     # via zarr
 numpy==1.26.4
+    # via contourpy
     # via finufft
     # via h5py
     # via jax
     # via jaxlib
+    # via matplotlib
     # via ml-dtypes
     # via mrboost
     # via nibabel
@@ -62,13 +74,19 @@ numpy==1.26.4
 opt-einsum==3.3.0
     # via jax
 packaging==24.0
+    # via matplotlib
     # via nibabel
     # via xarray
 pandas==2.2.2
     # via xarray
+pillow==10.3.0
+    # via matplotlib
 pydicom==2.4.4
     # via mrboost
+pyparsing==3.1.2
+    # via matplotlib
 python-dateutil==2.9.0.post0
+    # via matplotlib
     # via pandas
 pytorch-finufft @ git+https://github.com/flatironinstitute/pytorch-finufft.git@270369d4eaa6c770980871d3b73f0c1131a6571d
     # via mrboost

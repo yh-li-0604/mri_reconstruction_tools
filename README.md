@@ -21,4 +21,4 @@ from mrboost import io_utils as iou
 from mrboost import preprocessing as pre
 from mrboost import reconstruction as recon
 ```
-1. you can also refer to the `/src/main.py` to find out how to use this package.
+1. you can also refer to the `/src/mrboost/main.py` to find out how to use this package.

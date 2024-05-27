@@ -21,6 +21,7 @@ dependencies = [
     "fire>=0.6.0",
     "torch>=2.3.0",
     "pytorch-finufft @ git+https://github.com/flatironinstitute/pytorch-finufft.git",
+    "matplotlib>=3.9.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.8"
