@@ -1,4 +1,4 @@
-from typing import Optional, Sequence
+from typing import Sequence
 
 import einops as eo
 import einx
@@ -7,14 +7,6 @@ import jax.numpy as jnp
 import numpy as np
 import torch
 import torchkbnufft as tkbn
-from .type_utils import (
-    ComplexImage2D,
-    ComplexImage3D,
-    KspaceData,
-    KspaceSpokesData,
-    KspaceSpokesTraj,
-    KspaceTraj,
-)
 
 # from icecream import ic
 from jax import jit
@@ -30,7 +22,11 @@ from .computation import (
     nufft_adj_2d,
     radial_spokes_to_kspace_point,
 )
-from .torch_utils import as_complex, as_real, jax_to_torch, torch_to_jax
+from .torch_utils import as_real, jax_to_torch, torch_to_jax
+from .type_utils import (
+    KspaceSpokesTraj,
+    KspaceTraj,
+)
 
 
 @jit
@@ -153,7 +149,7 @@ def cihat_pipe_density_compensation(
 @overload
 def ramp_density_compensation(
     kspace_traj: KspaceTraj,
-    im_size: tuple = (320, 320),
+    im_size: Sequence[int] = (320, 320),
     *args,
     **wargs,
 ):
@@ -173,7 +169,7 @@ def ramp_density_compensation(
 @overload
 def ramp_density_compensation(
     kspace_traj: KspaceSpokesTraj,
-    im_size: tuple = (320, 320),
+    im_size: Sequence[int] = (320, 320),
     *args,
     **wargs,
 ):

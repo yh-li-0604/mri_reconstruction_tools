@@ -2,7 +2,6 @@ import os
 import re
 import time
 from copy import deepcopy
-from functools import singledispatch
 from glob import glob
 from itertools import chain
 from pathlib import Path
@@ -15,7 +14,9 @@ import numpy as np
 import pydicom
 import torch
 import zarr
+from plum import dispatch, overload
 from tqdm import tqdm
+from xarray import DataArray
 
 from .twix_metadata_def import *
 
@@ -319,22 +320,39 @@ def check_mk_dirs(paths):
             return True
 
 
-@singledispatch
-def to_nifty(img, output_path, affine=torch.eye(4, dtype=torch.float32)):
-    nifty_image = nib.Nifti1Image(img, affine)
-    nib.save(nifty_image, output_path)
-    print("Writed to: ", output_path)
-
-
-@to_nifty.register
-def _(img: torch.Tensor, output_path, affine=torch.eye(4, dtype=torch.float32)):
+@overload
+def to_nifty(
+    img: torch.Tensor,
+    output_path: str | bytes | os.PathLike,
+    affine=torch.eye(4, dtype=torch.float32),
+):
     nifty_image = nib.Nifti1Image(img.numpy(), affine)
     nib.save(nifty_image, output_path)
     print("Writed to: ", output_path)
 
 
-@to_nifty.register
-def _(img: np.ndarray, output_path, affine=torch.eye(4, dtype=torch.float32)):
+@overload
+def to_nifty(
+    img: np.ndarray,
+    output_path: str | bytes | os.PathLike,
+    affine=torch.eye(4, dtype=torch.float32),
+):
+    nifty_image = nib.Nifti1Image(img, affine)
+    nib.save(nifty_image, output_path)
+    print("Writed to: ", output_path)
+
+
+@overload
+def to_nifty(
+    img: DataArray,
+    output_path: str | bytes | os.PathLike,
+    affine=torch.eye(4, dtype=torch.float32),
+):
+    to_nifty(img.to_numpy(), output_path, affine)
+
+
+@dispatch
+def to_nifty(img, output_path, affine=torch.eye(4, dtype=torch.float32)):
     nifty_image = nib.Nifti1Image(img, affine)
     nib.save(nifty_image, output_path)
     print("Writed to: ", output_path)

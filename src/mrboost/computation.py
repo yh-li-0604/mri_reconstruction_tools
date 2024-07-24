@@ -1,6 +1,6 @@
 from numbers import Number
 from types import NoneType
-from typing import Sequence, Tuple
+from typing import Sequence
 
 import einx
 
@@ -8,21 +8,14 @@ import einx
 import scipy
 import torch
 import torch.nn.functional as F
-from .type_utils import (
-    ComplexImage2D,
-    ComplexImage3D,
-    KspaceData,
-    KspaceSpokesData,
-    KspaceSpokesTraj,
-    KspaceTraj,
-)
 
 # from juliacall import Main as jl
 # jl.include("/data-local/anlab/Chunxu/mri_reconstruction_tools/src/mrboost/computation.jl")
-from einops import pack, rearrange, reduce, repeat, unpack
+from einops import rearrange, reduce, repeat
+
 # from icecream import ic
 from jax import numpy as np
-from jaxtyping import Complex, Float, Shaped
+from jaxtyping import Shaped
 from plum import dispatch, overload
 from pytorch_finufft.functional import (
     FinufftType1,
@@ -34,6 +27,13 @@ from torch.fft import fft, fftshift, ifft, ifftshift
 from tqdm import tqdm
 
 from .io_utils import *
+from .type_utils import (
+    ComplexImage2D,
+    KspaceData,
+    KspaceSpokesData,
+    KspaceSpokesTraj,
+    KspaceTraj,
+)
 
 
 def batch_process(batch_size: int, device: torch.device, batch_dim=0):
@@ -196,7 +196,6 @@ def data_binning(
         index=repeat(
             sorted_r_idx,
             "t spokes_per_contra -> t spokes_per_contra spoke_len",
-            # t = nContrasts,
             spokes_per_contra=spokes_per_contra,
             spoke_len=spoke_len,
         ).expand_as(output),
@@ -342,7 +341,7 @@ def nufft_2d(
 
     output = torch.stack(
         [
-            nufft_2d(images[i], kspace_traj[i], image_size, norm_factor)
+            nufft_2d(images_batched[i], kspace_traj_batched[i], image_size, norm_factor)
             for i in range(batch_size)
         ],
     )

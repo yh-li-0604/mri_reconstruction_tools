@@ -947,7 +947,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         sorted_r, sorted_r_idx = torch.sort(respiratory_curve_contrast, dim=-1)
         # in each of the contrast, we sort the respiratory curve in order to classify respiratory phases
         if return_respiratory_curve:
-            return sorted_r, sorted_r_idx, respiratory_curve
+            return sorted_r, sorted_r_idx, respiratory_curve[self.binning_start_idx : self.binning_end_idx]
         else:
             return sorted_r_idx
 
