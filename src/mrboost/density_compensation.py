@@ -11,6 +11,7 @@ import torchkbnufft as tkbn
 # from icecream import ic
 from jax import jit
 from jax.tree_util import tree_map
+from jaxtyping import Shaped
 from plum import dispatch, overload
 from scipy.spatial import Voronoi
 
@@ -50,10 +51,13 @@ def voronoi_density_compensation(
 ):
     spoke_shape = eo.parse_shape(kspace_traj, "complx spokes_num spoke_len")
     kspace_traj = eo.rearrange(
-        kspace_traj, "complx spokes_num spoke_len -> complx (spokes_num spoke_len)"
+        kspace_traj,
+        "complx spokes_num spoke_len -> complx (spokes_num spoke_len)",
     )
 
-    kspace_traj = torch.complex(kspace_traj[0], kspace_traj[1]).contiguous().to(device)
+    kspace_traj = (
+        torch.complex(kspace_traj[0], kspace_traj[1]).contiguous().to(device)
+    )
     with jax.default_device(jax.devices("cpu")[0]):
         kspace_traj = torch_to_jax(kspace_traj)
         kspace_traj = (
@@ -131,7 +135,10 @@ def cihat_pipe_density_compensation(
     ).to(device)
 
     w = einx.rearrange(
-        "l -> (sp l)", torch.linspace(-1, 1 - 2 / l, l, device=device).abs(), sp=sp, l=l
+        "l -> (sp l)",
+        torch.linspace(-1, 1 - 2 / l, l, device=device).abs(),
+        sp=sp,
+        l=l,
     )
     impulse = torch.zeros(
         (im_size[0], im_size[1]), dtype=torch.complex64, device=device
@@ -150,8 +157,6 @@ def cihat_pipe_density_compensation(
 def ramp_density_compensation(
     kspace_traj: KspaceTraj,
     im_size: Sequence[int] = (320, 320),
-    *args,
-    **wargs,
 ):
     _, l = kspace_traj.shape
     w = torch.norm(kspace_traj, dim=0)
@@ -160,7 +165,9 @@ def ramp_density_compensation(
     )
     impulse[im_size[0] // 2, im_size[1] // 2] = 1
     return w / (
-        nufft_adj_2d(w * nufft_2d(impulse, kspace_traj, im_size), kspace_traj, im_size)
+        nufft_adj_2d(
+            w * nufft_2d(impulse, kspace_traj, im_size), kspace_traj, im_size
+        )
         .abs()
         .max()
     )
@@ -168,14 +175,21 @@ def ramp_density_compensation(
 
 @overload
 def ramp_density_compensation(
-    kspace_traj: KspaceSpokesTraj,
-    im_size: Sequence[int] = (320, 320),
-    *args,
-    **wargs,
+    kspace_traj: KspaceSpokesTraj, im_size: Sequence[int] = (320, 320)
 ):
     len = kspace_traj.shape[-1]
     w = ramp_density_compensation(radial_spokes_to_kspace_point(kspace_traj))
     return kspace_point_to_radial_spokes(w, len)
+
+
+@overload
+def ramp_density_compensation(
+    kspace_traj: Shaped[KspaceTraj, "b"],
+    im_size: Sequence[int] = (320, 320),
+):
+    return torch.stack(
+        [ramp_density_compensation(traj, im_size) for traj in kspace_traj]
+    )
 
 
 @dispatch

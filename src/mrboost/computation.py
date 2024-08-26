@@ -44,10 +44,15 @@ def batch_process(batch_size: int, device: torch.device, batch_dim=0):
                 (k, v.to(device)) if isinstance(v, torch.Tensor) else (k, v)
                 for k, v in kwargs.items()
             )
-            args_batched = [torch.split(data, batch_size, batch_dim) for data in args]
+            args_batched = [
+                torch.split(data, batch_size, batch_dim) for data in args
+            ]
+            print(args_batched[0][0].shape)
             batch_num = len(args_batched[0])
             for batch_idx in tqdm(range(batch_num)):
-                args_input = (data[batch_idx].to(device) for data in args_batched)
+                args_input = (
+                    data[batch_idx].to(device) for data in args_batched
+                )
                 outputs.append(func(*args_input, **kwargs_input).cpu())
             outputs = torch.cat(outputs, dim=batch_dim)
             for k, v in kwargs_input.items():
@@ -70,7 +75,12 @@ def hamming_filter(nonzero_width_percent: float, width: int) -> np.ndarray:
 
 
 def tuned_and_robust_estimation(
-    navigator: np.ndarray, percentW: float, Fs, FOV, ndata, device=torch.device("cuda")
+    navigator: np.ndarray,
+    percentW: float,
+    Fs,
+    FOV,
+    ndata,
+    device=torch.device("cuda"),
 ):
     """
     return channel and rotation index and generated curve
@@ -80,7 +90,10 @@ def tuned_and_robust_estimation(
     # To reduce noise, the navigator k-space data were apodized using a Hamming window.
     W = hamming_filter(percentW / 100, col_num)
     W = repeat(
-        W, "col_num -> col_num line_num ch_num", line_num=line_num, ch_num=ch_num
+        W,
+        "col_num -> col_num line_num ch_num",
+        line_num=line_num,
+        ch_num=ch_num,
     )
 
     # New quality metric block begin
@@ -97,20 +110,26 @@ def tuned_and_robust_estimation(
     phase_rotation_factors = torch.exp(
         -1j * 2 * torch.pi * torch.arange(1, 101, device=f.device) / 100
     )
-    r = torch.empty((projections.shape[1], projections.shape[2], 100), device=f.device)
+    r = torch.empty(
+        (projections.shape[1], projections.shape[2], 100), device=f.device
+    )
     for m in range(100):
         r[:, :, m] = torch.argmax(
             (phase_rotation_factors[m] * projections[:, :, :]).real, dim=0
         )
     # A = torch.einsum('xni,m->xnim',projections,phase_rotation_factors).real # np.multiply.outer(projections, phase_rorate..)
     # r = torch.argmax(A,dim=0).to(torch.double)+1 # 'x n i m -> n i m'
-    R = torch.abs(fftshift(fft(r - reduce(r, "n i m -> i m", "mean"), dim=0), dim=0))
+    R = torch.abs(
+        fftshift(fft(r - reduce(r, "n i m -> i m", "mean"), dim=0), dim=0)
+    )
 
     lowfreq_integral = reduce(
         R[(torch.abs(f) < 0.5) * (torch.abs(f) > 0.1)], "f i m -> i m", "sum"
     )
     highfreq_integral = reduce(R[torch.abs(f) > 0.8], "f i m -> i m", "sum")
-    r_range = reduce(r, "n i m -> i m", "max") - reduce(r, "n i m -> i m", "min")
+    r_range = reduce(r, "n i m -> i m", "max") - reduce(
+        r, "n i m -> i m", "min"
+    )
     lower_bound = torch.full_like(r_range, 30 / (FOV / (ndata / 2)))
     # what does this FOV/ndata use for
     determinator = torch.maximum(r_range, lower_bound)
@@ -123,10 +142,14 @@ def tuned_and_robust_estimation(
     # new quality metric block end
 
     # filter high frequency signal
-    b = scipy.signal.firwin(12, 1 / (Fs / 2), window="hamming", pass_zero="lowpass")
+    b = scipy.signal.firwin(
+        12, 1 / (Fs / 2), window="hamming", pass_zero="lowpass"
+    )
     a = 1
     r_max_low_pass = scipy.signal.filtfilt(b, a, r_max)
-    r_max_SG = scipy.signal.filtfilt(b, a, scipy.signal.savgol_filter(r_max, 5, 1))
+    r_max_SG = scipy.signal.filtfilt(
+        b, a, scipy.signal.savgol_filter(r_max, 5, 1)
+    )
     r_max_filtered = r_max_low_pass.copy()
     r_max_filtered[0:10], r_max_filtered[-10:] = r_max_SG[0:10], r_max_SG[-10:]
 
@@ -137,7 +160,6 @@ def centralize_kspace(
     kspace_data, acquire_length, center_idx_in_acquire_lenth, full_length, dim
 ) -> torch.Tensor:
     # center_in_acquire_length is index, here +1 to turn into quantity
-    # print(kspace_data[0,:,0,320])
     front_padding = round(full_length / 2 - (center_idx_in_acquire_lenth + 1))
     # the dc point can be located at length/2 or length/2+1, when length is even, cihat use length/2+1
     front_padding += 1
@@ -147,9 +169,12 @@ def centralize_kspace(
         full_length - acquire_length - front_padding,
     )
     pad_length.reverse()
-    # torch.nn.functional.pad() are using pad_lenth in a inverse way. (pad_front for axis -1,pad_back for axis -1, pad_front for axis -2, pad_back for axis-2 ......)
+    # torch.nn.functional.pad() are using pad_lenth in a inverse way.
+    # (pad_front for axis -1,pad_back for axis -1, pad_front for axis -2, pad_back for axis-2 ......)
     kspace_data_mask = torch.ones(kspace_data.shape, dtype=torch.bool)
-    kspace_data_mask = F.pad(kspace_data_mask, pad_length, mode="constant", value=False)
+    kspace_data_mask = F.pad(
+        kspace_data_mask, pad_length, mode="constant", value=False
+    )
     kspace_data_ = F.pad(
         kspace_data, pad_length, mode="constant"
     )  # default constant is 0
@@ -158,14 +183,20 @@ def centralize_kspace(
 
 
 def ifft_1D(kspace_data, dim=-1, norm="ortho"):
-    return fftshift(ifft(ifftshift(kspace_data, dim=dim), dim=dim, norm=norm), dim=dim)
+    return fftshift(
+        ifft(ifftshift(kspace_data, dim=dim), dim=dim, norm=norm), dim=dim
+    )
 
 
 def fft_1D(image_data, dim=-1, norm="ortho"):
-    return ifftshift(fft(fftshift(image_data, dim=dim), dim=dim, norm=norm), dim=dim)
+    return ifftshift(
+        fft(fftshift(image_data, dim=dim), dim=dim, norm=norm), dim=dim
+    )
 
 
-def generate_golden_angle_radial_spokes_kspace_trajectory(spokes_num, spoke_length):
+def generate_golden_angle_radial_spokes_kspace_trajectory(
+    spokes_num, spoke_length
+):
     # create a k-space trajectory
     KWIC_GOLDENANGLE = (np.sqrt(5) - 1) / 2  # = 111.246117975
     # M_PI = 3.14159265358979323846
@@ -177,11 +208,16 @@ def generate_golden_angle_radial_spokes_kspace_trajectory(spokes_num, spoke_leng
     ky = torch.outer(torch.sin(A), k)
     ktraj = torch.stack((kx, ky), dim=0)
     # ktraj = torch.complex(kx, ky)
-    return ktraj
+    return ktraj * 2 * torch.pi
 
 
 def data_binning(
-    data, sorted_r_idx, contrast_num, spokes_per_contra, phase_num, spokes_per_phase
+    data,
+    sorted_r_idx,
+    contrast_num,
+    spokes_per_contra,
+    phase_num,
+    spokes_per_phase,
 ):
     spoke_len = data.shape[-1]
     output = rearrange(
@@ -244,13 +280,17 @@ def data_binning_consecutive(data, spokes_per_contra):
 #     return torch.from_numpy(output)
 
 
-def recon_adjnufft(kspace_data, kspace_traj, kspace_density_compensation, adjnufft_ob):
+def recon_adjnufft(
+    kspace_data, kspace_traj, kspace_density_compensation, adjnufft_ob
+):
     return adjnufft_ob(
         rearrange(
             kspace_data * kspace_density_compensation,
             "... spoke spoke_len-> ... (spoke spoke_len)",
         ),
-        rearrange(kspace_traj, "complx spoke spoke_len -> complx (spoke spoke_len)"),
+        rearrange(
+            kspace_traj, "complx spoke spoke_len -> complx (spoke spoke_len)"
+        ),
     )
 
 
@@ -341,7 +381,12 @@ def nufft_2d(
 
     output = torch.stack(
         [
-            nufft_2d(images_batched[i], kspace_traj_batched[i], image_size, norm_factor)
+            nufft_2d(
+                images_batched[i],
+                kspace_traj_batched[i],
+                image_size,
+                norm_factor,
+            )
             for i in range(batch_size)
         ],
     )
@@ -390,11 +435,18 @@ def nufft_adj_2d(
     *batch_shape, _, length = kspace_traj.shape
     batch_size = np.prod(batch_shape, dtype=int)
 
-    kspace_traj_batched = kspace_traj.view(-1, 2, length)
+    # kspace_traj_batched = kspace_traj.view(-1, 2, length)
+    kspace_traj_batched = einx.rearrange(
+        "b... comp len -> (b...) comp len", kspace_traj
+    )
 
     *channel_shape, length = kspace_data.shape[len(batch_shape) :]
     kspace_data_batched = kspace_data.view(batch_size, *channel_shape, length)
-
+    # concatenate list of str
+    # ch_axes = "".join([f"ch_{i} " for i in range(len(channel_shape))])
+    # kspace_data_batched = einx.rearrange(
+    #     f"b... {ch_axes}len -> (b...) {ch_axes}len", kspace_data
+    # )
     output = torch.stack(
         [
             nufft_adj_2d(
@@ -406,7 +458,10 @@ def nufft_adj_2d(
             for i in range(batch_size)
         ],
     )
-    return output.view(*batch_shape, *channel_shape, *image_size)
+    return einx.rearrange(
+        "(b...) ch... h w -> b... ch... h w", output, b=batch_shape
+    )
+    # return output.view(*batch_shape, *channel_shape, *image_size)
 
 
 @dispatch

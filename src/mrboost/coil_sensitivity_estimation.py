@@ -6,27 +6,25 @@ import numpy as np
 
 # import sigpy as sp
 import torch
-import torchkbnufft as tkbn
-from einx import rearrange
 
 from . import computation as comp
 from .density_compensation import (
     cihat_pipe_density_compensation,
-    pipe_density_compensation,
     ramp_density_compensation,
 )
-from .torch_utils import center_crop
 
 
 def fft(x, ax):
     return np.fft.fftshift(
-        np.fft.fftn(np.fft.ifftshift(x, axes=ax), axes=ax, norm="ortho"), axes=ax
+        np.fft.fftn(np.fft.ifftshift(x, axes=ax), axes=ax, norm="ortho"),
+        axes=ax,
     )
 
 
 def ifft(X, ax):
     return np.fft.fftshift(
-        np.fft.ifftn(np.fft.ifftshift(X, axes=ax), axes=ax, norm="ortho"), axes=ax
+        np.fft.ifftn(np.fft.ifftshift(X, axes=ax), axes=ax, norm="ortho"),
+        axes=ax,
     )
 
 
@@ -44,7 +42,9 @@ def get_csm_lowk_xy(
         kspace_density_compensation_, spoke_len
     )
     spoke_len = kspace_data.shape[-1]
-    W = comp.hamming_filter(nonzero_width_percent=hamming_filter_ratio, width=spoke_len)
+    W = comp.hamming_filter(
+        nonzero_width_percent=hamming_filter_ratio, width=spoke_len
+    )
     spoke_lowpass_filter_xy = torch.from_numpy(W)
 
     kspace_data = spoke_lowpass_filter_xy * kspace_data
@@ -53,7 +53,9 @@ def get_csm_lowk_xy(
         spoke_lowpass_filter_xy,
         kspace_data,
     )
-    kspace_data = comp.ifft_1D(kspace_data * kspace_density_compensation_, dim=1)
+    kspace_data = comp.ifft_1D(
+        kspace_data * kspace_density_compensation_, dim=1
+    )
     kspace_data = kspace_data / kspace_data.abs().max()
     coil_sens = comp.nufft_adj_2d(
         comp.radial_spokes_to_kspace_point(kspace_data),
@@ -86,7 +88,9 @@ def get_csm_lowk_xyz(
         nonzero_width_percent=hamming_filter_ratio[0], width=spoke_len
     )
     spoke_lowpass_filter_xy = torch.from_numpy(W)
-    Wz = comp.hamming_filter(nonzero_width_percent=hamming_filter_ratio[1], width=z)
+    Wz = comp.hamming_filter(
+        nonzero_width_percent=hamming_filter_ratio[1], width=z
+    )
     spoke_lowpass_filter_z = torch.from_numpy(Wz)
 
     kspace_data = spoke_lowpass_filter_xy * kspace_data
@@ -96,7 +100,9 @@ def get_csm_lowk_xyz(
         spoke_lowpass_filter_z,
         kspace_data,
     )
-    kspace_data = comp.ifft_1D(kspace_data * kspace_density_compensation_, dim=1)
+    kspace_data = comp.ifft_1D(
+        kspace_data * kspace_density_compensation_, dim=1
+    )
     kspace_data = kspace_data / kspace_data.abs().max()
     coil_sens = comp.nufft_adj_2d(
         comp.radial_spokes_to_kspace_point(kspace_data),
@@ -120,7 +126,9 @@ def lowk_xy(
     device=torch.device("cpu"),
 ):
     spoke_len = kspace_data.shape[-1]
-    W = comp.hamming_filter(nonzero_width_percent=hamming_filter_ratio, width=spoke_len)
+    W = comp.hamming_filter(
+        nonzero_width_percent=hamming_filter_ratio, width=spoke_len
+    )
     spoke_lowpass_filter_xy = torch.from_numpy(W)
 
     @comp.batch_process(batch_size=batch_size, device=device, batch_dim=0)
@@ -143,7 +151,8 @@ def lowk_xy(
         kspace_data,
         filter=spoke_lowpass_filter_xy,
         ktraj=eo.rearrange(
-            kspace_traj, "complx spoke_num spoke_len -> complx (spoke_num spoke_len)"
+            kspace_traj,
+            "complx spoke_num spoke_len -> complx (spoke_num spoke_len)",
         ),
     )
 
@@ -208,7 +217,8 @@ def lowk_xyz(
         filter_xy=spoke_lowpass_filter_xy,
         filter_z=spoke_lowpass_filter_z,
         ktraj=eo.rearrange(
-            kspace_traj, "complx spoke_num spoke_len -> complx (spoke_num spoke_len)"
+            kspace_traj,
+            "complx spoke_num spoke_len -> complx (spoke_num spoke_len)",
         ),
     )
     img_sens_SOS = torch.sqrt(
@@ -252,7 +262,9 @@ def espirit_cartesian(X, k, r, t, c):
     szt = (sz // 2 - r // 2, sz // 2 + r // 2) if (sz > 1) else (0, 1)
 
     # Extract calibration region.
-    C = X[sxt[0] : sxt[1], syt[0] : syt[1], szt[0] : szt[1], :].astype(np.complex64)
+    C = X[sxt[0] : sxt[1], syt[0] : syt[1], szt[0] : szt[1], :].astype(
+        np.complex64
+    )
 
     # Construct Hankel matrix.
     p = (sx > 1) + (sy > 1) + (sz > 1)
@@ -263,9 +275,9 @@ def espirit_cartesian(X, k, r, t, c):
         for ydx in range(max(1, C.shape[1] - k + 1)):
             for zdx in range(max(1, C.shape[2] - k + 1)):
                 # numpy handles when the indices are too big
-                block = C[xdx : xdx + k, ydx : ydx + k, zdx : zdx + k, :].astype(
-                    np.complex64
-                )
+                block = C[
+                    xdx : xdx + k, ydx : ydx + k, zdx : zdx + k, :
+                ].astype(np.complex64)
                 A[idx, :] = block.flatten()
                 idx = idx + 1
 
@@ -290,8 +302,8 @@ def espirit_cartesian(X, k, r, t, c):
         nc,
     ]
     for idx in range(n):
-        kernels[kxt[0] : kxt[1], kyt[0] : kyt[1], kzt[0] : kzt[1], :, idx] = np.reshape(
-            V[:, idx], kerdims
+        kernels[kxt[0] : kxt[1], kyt[0] : kyt[1], kzt[0] : kzt[1], :, idx] = (
+            np.reshape(V[:, idx], kerdims)
         )
 
     # Take the iucfft
@@ -338,7 +350,8 @@ def espirit_proj(x, esp):
     for qdx in range(0, esp.shape[4]):
         for pdx in range(0, esp.shape[3]):
             ip[:, :, :, qdx] = (
-                ip[:, :, :, qdx] + x[:, :, :, pdx] * esp[:, :, :, pdx, qdx].conj()
+                ip[:, :, :, qdx]
+                + x[:, :, :, pdx] * esp[:, :, :, pdx, qdx].conj()
             )
 
     for qdx in range(0, esp.shape[4]):

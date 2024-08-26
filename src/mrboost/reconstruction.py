@@ -1,7 +1,7 @@
 # %%
-from dataclasses import dataclass, field
 from itertools import product
-from typing import Any, Callable, Dict, Optional, Sequence, Type, Union
+from pathlib import Path
+from typing import Sequence, Union
 
 import einx
 import numpy as np
@@ -11,332 +11,49 @@ import torchkbnufft as tkbn
 from einops import parse_shape
 
 # from icecream import ic
-from plum import dispatch, overload
-
 from mrboost import computation as comp
 from mrboost.coil_sensitivity_estimation import (
     Lowk_2D_CSE,
     Lowk_3D_CSE,
-    get_csm_lowk_xy,
-    get_csm_lowk_xyz,
 )
 from mrboost.density_compensation import (
     cihat_pipe_density_compensation,
-    ramp_density_compensation,
     voronoi_density_compensation,
 )
-from mrboost.io_utils import *
 from mrboost.mapvbvd import mapVBVD
-from mrboost.twix_metadata_def import *
+
+# from mrboost.io_utils import *
+from mrboost.sequence.BlackBoneStationary import (
+    BlackBoneStationaryArgs,
+    mcnufft_reconstruct,
+    preprocess_raw_data,
+)
+from mrboost.sequence.CAPTURE_VarW_NQM_DCE_PostInj import (
+    CAPTURE_VarW_NQM_DCE_PostInj_Args,
+    mcnufft_reconstruct,
+    preprocess_raw_data,
+)
+from mrboost.sequence.DynGoldenAngleVibe import (
+    DynGoldenAngleVibeArgs,
+    mcnufft_reconstruct,
+    preprocess_raw_data,
+)
+from mrboost.sequence.GoldenAngle import (
+    GoldenAngleArgs,
+    mcnufft_reconstruct,
+    preprocess_raw_data,
+)
+
+__all__ = [
+    GoldenAngleArgs,
+    DynGoldenAngleVibeArgs,
+    BlackBoneStationaryArgs,
+    CAPTURE_VarW_NQM_DCE_PostInj_Args,
+    preprocess_raw_data,
+    mcnufft_reconstruct,
+]
 
 
-@dataclass
-class ReconArgs:
-    shape_dict: Dict
-    mdh: Any
-    twixobj: Any
-    device: torch.device = torch.device("cuda")
-    partial_fourier_flag: bool = True
-    amplitude_scale_factor: float = field(init=False)
-    ch_num: int = field(init=False)
-    partition_num: int = field(init=False)
-    spoke_num: int = field(init=False)
-    spoke_len: int = field(init=False)
-    TR: float = field(init=False)
-    T: float = field(init=False)
-    Fs: float = field(init=False)
-    FOV: float = field(init=False)
-    im_size: tuple[int, int] = field(init=False)
-    kspace_centre_partition_num: Optional[int] = field(default=None, init=False)
-    slice_num: int = field(init=False)
-
-    def __post_init__(self):
-        if self.partial_fourier_flag:
-            self.kspace_centre_partition_num = int(
-                self.mdh.ushKSpaceCentrePartitionNo[0]
-            )
-            try:
-                self.slice_num = round(
-                    self.twixobj.hdr.Meas.lImagesPerSlab
-                    * (1 + self.twixobj.hdr.Meas.dSliceOversamplingForDialog)
-                )
-            except TypeError:
-                self.slice_num = round(self.twixobj.hdr.Meas.lImagesPerSlab)
-        else:
-            self.slice_num = round(self.twixobj.hdr.Meas.lImagesPerSlab)
-
-        self.amplitude_scale_factor = 80 * 20 * 131072 / 65536 * 20000
-
-        self.ch_num = self.shape_dict["ch_num"]
-        self.partition_num = self.shape_dict["partition_num"]
-        self.spoke_num = self.shape_dict["spoke_num"]
-        self.spoke_len = self.shape_dict["spoke_len"]
-
-        self.TR = self.twixobj.hdr.MeasYaps[("alTR", "0")] / 1000
-        self.T = (
-            self.TR * self.partition_num * 1e-3 + 18.86e-3
-        )  # 19e-3 is for Q-fat sat
-        self.Fs = 1 / self.T
-        try:
-            self.FOV = self.twixobj.hdr.Meas.RoFOV  # type: ignore
-        except AttributeError:
-            self.FOV = self.twixobj.hdr.Protocol.RoFOV
-
-        self.im_size = (self.spoke_len // 2, self.spoke_len // 2)
-
-
-@dataclass
-class GoldenAngleArgs(ReconArgs):
-    adjnufft: Callable = field(init=False)
-    nufft: Callable = field(init=False)
-
-    def __post_init__(self):
-        super().__post_init__()
-        self.adjnufft = lambda x, y: comp.nufft_adj_2d(x, y, self.im_size)
-        self.nufft = lambda x, y: comp.nufft_2d(x, y, self.im_size)
-
-
-@dataclass
-class DynGoldenAngleVibeArgs(GoldenAngleArgs):
-    # duration_to_reconstruct: int = 1200  # in seconds
-    # time_per_contrast: int = 60  # in seconds
-    contra_num: int = 20
-    spokes_per_contra: int = 320
-
-    start_spokes_to_discard: int = field(init=False)  # to reach the steady state
-    binning_spoke_slice: slice = field(init=False)
-
-    def __post_init__(self):
-        super().__post_init__()
-        self.start_spokes_to_discard = 10
-        self.binning_spoke_slice = slice(0, self.contra_num * self.spokes_per_contra)
-
-
-@dataclass
-class BlackBoneStationaryArgs(GoldenAngleArgs):
-    # start_spokes_to_discard: int = field(init=False)  # to reach the steady state
-    nSubVolSlc: int = field(init=False)
-
-    def __post_init__(self):
-        super().__post_init__()
-        self.nSubVolSlc = round(self.slice_num * 3 / 4)
-
-
-def get_raw_data(dat_file_location: Path):
-    twixobj, mdh = mapVBVD(dat_file_location)
-    # try:
-    twixobj = twixobj[-1]
-    # except KeyError:
-    #     self.twixobj = twixobj
-    twixobj.image.squeeze = True
-    twixobj.image.flagRemoveOS = False
-    raw_data = einx.rearrange(
-        "spoke_len ch_num spoke_num partition_num -> ch_num partition_num spoke_num spoke_len",
-        twixobj.image[""],
-    )
-    shape_dict = parse_shape(raw_data, "ch_num partition_num spoke_num spoke_len")
-    print(shape_dict)
-    return torch.from_numpy(raw_data), shape_dict, mdh, twixobj
-
-
-@overload
-def preprocess_raw_data(raw_data: torch.Tensor, recon_args: GoldenAngleArgs):
-    kspace_raw_data = raw_data * recon_args.amplitude_scale_factor
-    kspace_traj = (
-        2
-        * torch.pi
-        * comp.generate_golden_angle_radial_spokes_kspace_trajectory(
-            recon_args.spoke_num, recon_args.spoke_len
-        )
-    )
-    if recon_args.partial_fourier_flag:
-        kspace_data_centralized, kspace_data_mask = comp.centralize_kspace(
-            kspace_data=kspace_raw_data,
-            acquire_length=recon_args.partition_num,
-            center_idx_in_acquire_lenth=recon_args.kspace_centre_partition_num,
-            full_length=recon_args.slice_num,
-            dim=1,
-        )
-    else:
-        kspace_data_centralized = kspace_raw_data
-    kspace_data_z = comp.batch_process(batch_size=4, device=recon_args.device)(
-        comp.ifft_1D
-    )(kspace_data_centralized, dim=1, norm="backward")
-    return dict(
-        kspace_data_centralized=kspace_data_centralized,
-        kspace_data_z=kspace_data_z,
-        kspace_traj=kspace_traj,
-    )
-
-
-@overload
-def preprocess_raw_data(raw_data: torch.Tensor, recon_args: DynGoldenAngleVibeArgs):
-    _dict = preprocess_raw_data.invoke(torch.Tensor, GoldenAngleArgs)(
-        raw_data, recon_args
-    )
-    kspace_data_centralized = comp.data_binning_consecutive(
-        _dict["kspace_data_centralized"][:, :, recon_args.start_spokes_to_discard :, :][
-            :, :, recon_args.binning_spoke_slice
-        ],
-        recon_args.spokes_per_contra,
-    )
-    kspace_data_z = comp.data_binning_consecutive(
-        _dict["kspace_data_z"][:, :, recon_args.start_spokes_to_discard :, :][
-            :, :, recon_args.binning_spoke_slice
-        ],
-        recon_args.spokes_per_contra,
-    )
-    kspace_traj = comp.data_binning_consecutive(
-        _dict["kspace_traj"][:, recon_args.start_spokes_to_discard :][
-            :, recon_args.binning_spoke_slice
-        ],
-        recon_args.spokes_per_contra,
-    )
-    return dict(
-        kspace_data_centralized=kspace_data_centralized,
-        kspace_data_z=kspace_data_z,
-        kspace_traj=kspace_traj,
-    )
-
-
-@overload
-def preprocess_raw_data(raw_data: torch.Tensor, recon_args: BlackBoneStationaryArgs):
-    _dict = preprocess_raw_data.invoke(torch.Tensor, GoldenAngleArgs)(
-        raw_data, recon_args
-    )
-    kspace_data_centralized, kspace_data_z, kspace_traj = (
-        _dict["kspace_data_centralized"],
-        _dict["kspace_data_z"],
-        _dict["kspace_traj"],
-    )
-    csm = get_csm_lowk_xyz(
-        kspace_data_centralized,
-        kspace_traj,
-        recon_args.im_size,
-        [0.03, 0.03],
-        recon_args.device,
-    )
-
-    return dict(
-        kspace_data_z=kspace_data_z,
-        kspace_traj=kspace_traj,
-        csm=csm,
-    )
-
-
-@overload
-def mcnufft_reconstruct(
-    data_preprocessed: Dict[str, torch.Tensor],
-    recon_args: BlackBoneStationaryArgs,
-    return_multi_channel: bool = False,
-    *args,
-    **kwargs,
-):
-    kspace_data_z, kspace_traj, csm = (
-        data_preprocessed["kspace_data_z"],
-        data_preprocessed["kspace_traj"],
-        data_preprocessed["csm"],
-    )
-    kspace_data_z = comp.radial_spokes_to_kspace_point(kspace_data_z)
-    kspace_traj = comp.radial_spokes_to_kspace_point(kspace_traj)
-    kspace_density_compensation = ramp_density_compensation(
-        kspace_traj,
-        im_size=recon_args.im_size,
-    )
-    img_multi_ch = comp.nufft_adj_2d(
-        kspace_data_z * kspace_density_compensation,
-        kspace_traj,
-        recon_args.im_size,
-    )
-    img = einx.sum("[ch] slice w h", img_multi_ch * csm.conj())
-    return img
-
-
-@dispatch
-def preprocess_raw_data(
-    raw_data,
-    recon_args,
-):
-    pass
-
-
-@overload
-def mcnufft_reconstruct(
-    data_preprocessed: Dict[str, torch.Tensor],
-    recon_args: GoldenAngleArgs,
-    return_multi_channel: bool = False,
-    *args,
-    **kwargs,
-):
-    kspace_data_centralized, kspace_data_z, kspace_traj = (
-        data_preprocessed["kspace_data_centralized"],
-        data_preprocessed["kspace_data_z"],
-        data_preprocessed["kspace_traj"],
-    )
-
-    csm = get_csm_lowk_xy(
-        kspace_data_centralized,
-        kspace_traj,
-        recon_args.im_size,
-        0.05,
-    )
-
-    kspace_density_compensation = voronoi_density_compensation(
-        kspace_traj,
-        device=kspace_traj.device,
-    )
-    kspace_data = comp.radial_spokes_to_kspace_point(
-        kspace_data_z * kspace_density_compensation
-    )
-    kspace_traj = comp.radial_spokes_to_kspace_point(kspace_traj)
-
-    img_multi_ch = comp.nufft_adj_2d(
-        kspace_data,
-        kspace_traj,
-        recon_args.im_size,
-    )
-    img = einx.sum("[ch] slice w h", img_multi_ch * csm.conj())
-    return img
-
-
-@overload
-def mcnufft_reconstruct(
-    data_preprocessed: Dict[str, torch.Tensor],
-    recon_args: DynGoldenAngleVibeArgs,
-    return_multi_channel: bool = False,
-    *args,
-    **kwargs,
-):
-    images = []
-    for t in range(recon_args.contra_num):
-        ic("reconstructing contrast:", t)
-        arguments = GoldenAngleArgs(
-            recon_args.shape_dict,
-            recon_args.mdh,
-            recon_args.twixobj,
-            recon_args.device,
-        )
-        img = mcnufft_reconstruct(
-            {k: v[t] for k, v in data_preprocessed.items()},
-            arguments,
-            return_multi_channel,
-        )
-        images.append(img)
-    return torch.stack(images, dim=0)
-
-
-@dispatch
-def mcnufft_reconstruct(
-    data_preprocessed,
-    recon_args,
-    return_multi_channel,
-    *args,
-    **kwargs,
-):
-    pass
-
-
-# %%
 class Reconstructor:
     def __init__(
         self,
@@ -351,10 +68,6 @@ class Reconstructor:
         self.dat_file_location = dat_file_location
         self.which_slice = which_slice
         self.device = device
-        # data_raw = self.__get_raw_data(dat_file_location)
-        # self.__args_init(*args,**kwargs)
-        # data_dict = self.__data_preprocess(data_raw)
-        # self.img = self.reconstruction(data_dict)
 
     def get_raw_data(self, dat_file_location):
         twixobj, self.mdh = mapVBVD(dat_file_location)
@@ -419,17 +132,22 @@ class Reconstructor:
         return dict(kspace_data=data_raw, kspace_traj=kspace_traj)
 
     def reconstruction(self, data_dict):
-        kspace_data, kspace_traj = data_dict["kspace_data"], data_dict["kspace_traj"]
+        kspace_data, kspace_traj = (
+            data_dict["kspace_data"],
+            data_dict["kspace_traj"],
+        )
 
 
-# %%
 class BlackBoneStackOfStars_Subset_4DL_LowResZ(Reconstructor):
     def __init__(
         self,
         dat_file_location: Path = Path(
             "/data/anlab/Chunxu/meas_MID00017_FID93856_fl3d_vibe_GA_BlackBone_20210507.dat"
         ),
-        spokes_to_recon: Union[int, Sequence] = (6, 400),  # (0,-1)  -1 means all
+        spokes_to_recon: Union[int, Sequence] = (
+            6,
+            400,
+        ),  # (0,-1)  -1 means all
         which_slice: Union[int, Sequence] = (0, 80),
         percentW: float = 12.5,
         cache_folder: Path = Path(".") / "cache",
@@ -543,10 +261,16 @@ class BlackBoneStackOfStars_Subset_4DL_LowResZ(Reconstructor):
         )
 
         img = torch.zeros(
-            (len(self.slice_to_recon), self.im_size[0] // 2, self.im_size[1] // 2),
+            (
+                len(self.slice_to_recon),
+                self.im_size[0] // 2,
+                self.im_size[1] // 2,
+            ),
             dtype=torch.complex64,
         )
-        sensitivity_map = cse[0, 0].to(torch.complex64).conj()[:, self.slice_to_recon]
+        sensitivity_map = (
+            cse[0, 0].to(torch.complex64).conj()[:, self.slice_to_recon]
+        )
         output = comp.batch_process(batch_size=2, device=self.device)(
             comp.recon_adjnufft
         )(
@@ -612,21 +336,23 @@ class CAPTURE_VarW_NQM_DCE_PriorInj(Reconstructor):
         ]
 
         self.start_spokes_to_discard = max(
-            max(self.phase_num, 10), self.phase_num * np.ceil(10 / self.phase_num)
+            max(self.phase_num, 10),
+            self.phase_num * np.ceil(10 / self.phase_num),
         )
 
         self.binning_start_idx = self.start_spokes_to_discard
         self.binning_end_idx = (
-            self.start_spokes_to_discard + self.phase_num * self.spokes_per_phase
+            self.start_spokes_to_discard
+            + self.phase_num * self.spokes_per_phase
         )
 
         # build nufft operators
         self.adjnufft = tkbn.KbNufftAdjoint(
             im_size=self.im_size, grid_size=self.grid_size
         ).to(self.device)
-        self.nufft = tkbn.KbNufft(im_size=self.im_size, grid_size=self.grid_size).to(
-            self.device
-        )
+        self.nufft = tkbn.KbNufft(
+            im_size=self.im_size, grid_size=self.grid_size
+        ).to(self.device)
 
     def data_preprocess(self, data_raw):
         data_raw *= self.amplitude_scale_factor
@@ -661,21 +387,32 @@ class CAPTURE_VarW_NQM_DCE_PriorInj(Reconstructor):
             device=self.device,
         )
 
-        kspace_traj, kspace_data_z, kspace_data_centralized, kspace_data_mask = map(
+        (
+            kspace_traj,
+            kspace_data_z,
+            kspace_data_centralized,
+            kspace_data_mask,
+        ) = map(
             comp.data_binning_phase,
             [
                 kspace_traj[self.binning_start_idx : self.binning_end_idx],
-                kspace_data_z[:, :, self.binning_start_idx : self.binning_end_idx],
+                kspace_data_z[
+                    :, :, self.binning_start_idx : self.binning_end_idx
+                ],
                 kspace_data_centralized[
                     :, :, self.binning_start_idx : self.binning_end_idx
                 ],
-                kspace_data_mask[:, :, self.binning_start_idx : self.binning_end_idx],
+                kspace_data_mask[
+                    :, :, self.binning_start_idx : self.binning_end_idx
+                ],
             ],
             [sorted_r_idx] * 4,
             [self.phase_num] * 4,
             [self.spokes_per_phase] * 4,
         )
-        sp = parse_shape(kspace_data_z, "phase_num ch slice_num spoke_num spoke_len")
+        sp = parse_shape(
+            kspace_data_z, "phase_num ch slice_num spoke_num spoke_len"
+        )
         kspace_density_compensation = torch.zeros(
             (sp["phase_num"], sp["spoke_num"], sp["spoke_len"]),
             dtype=torch.float32,
@@ -705,7 +442,8 @@ class CAPTURE_VarW_NQM_DCE_PriorInj(Reconstructor):
             device=self.device,
         )
         sorted_r, sorted_r_idx = torch.sort(
-            respiratory_curve[self.binning_start_idx : self.binning_end_idx], dim=-1
+            respiratory_curve[self.binning_start_idx : self.binning_end_idx],
+            dim=-1,
         )
         # in each of the contrast, we sort the respiratory curve in order to classify respiratory phases
         return sorted_r_idx
@@ -731,7 +469,9 @@ class CAPTURE_VarW_NQM_DCE_PriorInj(Reconstructor):
             data_dict["kspace_density_compensation"],
             data_dict["cse"],
         )
-        sp = parse_shape(kspace_data_z, "phase_num ch slice_num spoke_num spoke_len")
+        sp = parse_shape(
+            kspace_data_z, "phase_num ch slice_num spoke_num spoke_len"
+        )
         ph = phase
         img_multi_ch = comp.batch_process(batch_size=2, device=self.device)(
             comp.recon_adjnufft
@@ -744,7 +484,9 @@ class CAPTURE_VarW_NQM_DCE_PriorInj(Reconstructor):
             :,
             self.slice_to_recon,
         ]
-        sensitivity_map = cse[0, ph].to(torch.complex64).conj()[:, self.slice_to_recon]
+        sensitivity_map = (
+            cse[0, ph].to(torch.complex64).conj()[:, self.slice_to_recon]
+        )
         img = einx.sum(
             "[ch] slice w h",
             img_multi_ch * sensitivity_map,
@@ -810,7 +552,8 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         ]
 
         self.start_spokes_to_discard = max(
-            max(self.phase_num, 10), self.phase_num * np.ceil(10 / self.phase_num)
+            max(self.phase_num, 10),
+            self.phase_num * np.ceil(10 / self.phase_num),
         )
 
         nSpokesToWorkWith = np.floor(self.duration_to_reconstruct / self.T)
@@ -823,10 +566,14 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         self.spokes_per_contra = int(
             nSpokesPerContrast - np.mod(nSpokesPerContrast, self.phase_num)
         )
-        self.contra_num = int(np.floor(nSpokesToWorkWith / self.spokes_per_contra))
+        self.contra_num = int(
+            np.floor(nSpokesToWorkWith / self.spokes_per_contra)
+        )
         self.spokes_per_phase = int(nSpokesPerContrast / self.phase_num)
 
-        self.binning_start_idx = self.spokes_to_skip - self.start_spokes_to_discard
+        self.binning_start_idx = (
+            self.spokes_to_skip - self.start_spokes_to_discard
+        )
         self.binning_end_idx = (
             self.spokes_to_skip
             - self.start_spokes_to_discard
@@ -860,9 +607,7 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
             data_raw_[:, 0, self.start_spokes_to_discard :, :],
         )
         kspace_traj = (
-            2
-            * torch.pi
-            * comp.generate_golden_angle_radial_spokes_kspace_trajectory(
+            comp.generate_golden_angle_radial_spokes_kspace_trajectory(
                 self.spoke_num, self.spoke_len
             )[:, self.start_spokes_to_discard :]
         )
@@ -887,15 +632,24 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
 
         # cse = Lowk_3D_CSE(kspace_data_centralized, kspace_traj,self.nufft_ob, self.adjnufft_ob,
         #                   hamming_filter_ratio=[0.05,0.1], batch_size=2, device=self.device)
-        kspace_traj, kspace_data_z, kspace_data_centralized, kspace_data_mask = map(
+        (
+            kspace_traj,
+            kspace_data_z,
+            kspace_data_centralized,
+            kspace_data_mask,
+        ) = map(
             comp.data_binning,
             [
                 kspace_traj[:, self.binning_start_idx : self.binning_end_idx],
-                kspace_data_z[:, :, self.binning_start_idx : self.binning_end_idx],
+                kspace_data_z[
+                    :, :, self.binning_start_idx : self.binning_end_idx
+                ],
                 kspace_data_centralized[
                     :, :, self.binning_start_idx : self.binning_end_idx
                 ],
-                kspace_data_mask[:, :, self.binning_start_idx : self.binning_end_idx],
+                kspace_data_mask[
+                    :, :, self.binning_start_idx : self.binning_end_idx
+                ],
             ],
             [sorted_r_idx] * 4,
             [self.contra_num] * 4,
@@ -904,10 +658,16 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
             [self.spokes_per_phase] * 4,
         )
         sp = parse_shape(
-            kspace_data_z, "contra_num phase_num ch slice_num spoke_num spoke_len"
+            kspace_data_z,
+            "contra_num phase_num ch slice_num spoke_num spoke_len",
         )
         kspace_density_compensation = torch.zeros(
-            (sp["contra_num"], sp["phase_num"], sp["spoke_num"], sp["spoke_len"]),
+            (
+                sp["contra_num"],
+                sp["phase_num"],
+                sp["spoke_num"],
+                sp["spoke_len"],
+            ),
             dtype=torch.float32,
             device=kspace_traj.device,
         )
@@ -947,7 +707,13 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         sorted_r, sorted_r_idx = torch.sort(respiratory_curve_contrast, dim=-1)
         # in each of the contrast, we sort the respiratory curve in order to classify respiratory phases
         if return_respiratory_curve:
-            return sorted_r, sorted_r_idx, respiratory_curve[self.binning_start_idx : self.binning_end_idx]
+            return (
+                sorted_r,
+                sorted_r_idx,
+                respiratory_curve[
+                    self.binning_start_idx : self.binning_end_idx
+                ],
+            )
         else:
             return sorted_r_idx
 
@@ -966,7 +732,9 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
         )(kspace_data_centralized, dim=1, norm="backward")
         return kspace_data_centralized, kspace_data_mask, kspace_data_z
 
-    def reconstruction(self, data_dict, contrast, phase, return_multi_channel=False):
+    def reconstruction(
+        self, data_dict, contrast, phase, return_multi_channel=False
+    ):
         kspace_data_z, kspace_traj, kspace_density_compensation, cse = (
             data_dict["kspace_data_z"],
             data_dict["kspace_traj"],
@@ -974,7 +742,8 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
             data_dict["cse"],
         )
         sp = parse_shape(
-            kspace_data_z, "contra_num phase_num ch slice_num spoke_num spoke_len"
+            kspace_data_z,
+            "contra_num phase_num ch slice_num spoke_num spoke_len",
         )
         t, ph = contrast, phase
         # img = torch.zeros((len(self.slice_to_recon), self.im_size[0]//2, self.im_size[1]//2), dtype=torch.complex64)
@@ -986,12 +755,14 @@ class CAPTURE_VarW_NQM_DCE_PostInj(Reconstructor):
             kspace_data_z[t, ph, :],  # , self.first_slice:args.last_slice],
             kspace_traj=kspace_traj[t, ph],
             kspace_density_compensation=kspace_density_compensation[t, ph],
-            adjnufft_ob=self.adjnufft_ob,
+            adjnufft_ob=self.adjnufft,
         )[
             :,
             self.slice_to_recon,
         ]
-        sensitivity_map = cse[t, ph].to(torch.complex64).conj()[:, self.slice_to_recon]
+        sensitivity_map = (
+            cse[t, ph].to(torch.complex64).conj()[:, self.slice_to_recon]
+        )
         # flip and transpose
         img = einx.sum(
             "[ch] slice w h",
@@ -1045,9 +816,7 @@ class BlackBone_LowResFrames(Reconstructor):
         ) = self.kspace_data_preprocess(data_raw_)
         spoke_len = kspace_data_z.shape[-1]
         kspace_traj = (
-            2
-            * torch.pi
-            * comp.generate_golden_angle_radial_spokes_kspace_trajectory(
+            comp.generate_golden_angle_radial_spokes_kspace_trajectory(
                 self.spoke_num, self.spoke_len
             )
         )
@@ -1067,14 +836,21 @@ class BlackBone_LowResFrames(Reconstructor):
         #     for spokes_to_use in self.motion_curve_idx
         # ]
         kspace_traj_frames = [
-            kspace_traj[:, spokes_to_use, :] for spokes_to_use in self.motion_curve_idx
+            kspace_traj[:, spokes_to_use, :]
+            for spokes_to_use in self.motion_curve_idx
         ]
         kspace_data_z_frames = []
         for spokes_to_use in self.motion_curve_idx:
-            apod_percent = max(min(100, 40 / 30 * spokes_to_use.shape[0]), 20) / 100
-            W = comp.hamming_filter(nonzero_width_percent=apod_percent, width=spoke_len)
+            apod_percent = (
+                max(min(100, 40 / 30 * spokes_to_use.shape[0]), 20) / 100
+            )
+            W = comp.hamming_filter(
+                nonzero_width_percent=apod_percent, width=spoke_len
+            )
             if apodize:
-                kspace_data_z_frames.append(kspace_data_z[:, :, spokes_to_use] * W)
+                kspace_data_z_frames.append(
+                    kspace_data_z[:, :, spokes_to_use] * W
+                )
             else:
                 kspace_data_z_frames.append(kspace_data_z[:, :, spokes_to_use])
 
@@ -1095,7 +871,9 @@ class BlackBone_LowResFrames(Reconstructor):
                     self.im_size,
                     device=kspace_traj.device,
                 )
-                * len(self.motion_curve_idx[0])  # normalize with number of spokes
+                * len(
+                    self.motion_curve_idx[0]
+                )  # normalize with number of spokes
                 / len(self.motion_curve_idx[f])
             )
         return dict(
@@ -1140,7 +918,6 @@ class BlackBone_LowResFrames(Reconstructor):
         sensitivity_map = (
             cse[frame, 0].to(torch.complex64).conj()
         )  # [:, self.slice_to_recon]
-        # flip and transpose
         img = einx.sum("[ch] slice w h", img_multi_ch * sensitivity_map)
         if not return_multi_channel:
             return img
@@ -1153,37 +930,3 @@ class BlackBone_LowResFrames(Reconstructor):
         data_dict = self.data_preprocess(data_raw)
         img = self.reconstruction(data_dict)
         return img
-
-
-# %%
-if __name__ == "__main__":
-    # if you want to reconstruct step by step (cache each of step in memory if in jupyter interative mode)
-    # reconstructor = CAPTURE_VarW_NQM_DCE_PostInj(
-    #     dat_file_location=Path(
-    #         "/data/anlab/PET_MOCO/PETMRdata/CAPTURE_DCE/ONC-DCE-004/meas_MID00165_FID04589_Abd_CAPTURE_FA15_Dyn.dat"
-    #     ),
-    #     which_slice=50,
-    #     which_contra=0,
-    #     which_phase=0,
-    # )
-    # data_raw = reconstructor.get_raw_data(reconstructor.dat_file_location)
-    # reconstructor.args_init()
-    # data_dict = reconstructor.data_preprocess(data_raw)
-    # img = reconstructor.reconstruction(data_dict)
-
-    # # If you want just want to reconstruct
-    # reconstructor = CAPTURE_VarW_NQM_DCE_PostInj(
-    #     dat_file_location=Path(
-    #         "/data/anlab/PET_MOCO/PETMRdata/CAPTURE_DCE/ONC-DCE-004/meas_MID00165_FID04589_Abd_CAPTURE_FA15_Dyn.dat"
-    #     ),
-    #     which_slice=50,
-    #     which_contra=0,
-    #     which_phase=0,
-    # )
-    # img = reconstructor.forward()
-
-    r = BlackBone_LowResFrames()
-    data_raw = r.get_raw_data(r.dat_file_location)
-    r.args_init()
-    data_dict = r.data_preprocess(data_raw)
-    img = r.forward()
