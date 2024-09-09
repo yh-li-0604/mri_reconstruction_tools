@@ -31,29 +31,9 @@ class BlackBoneStationaryArgs(GoldenAngleArgs):
 
 
 @dispatch
-def preprocess_raw_data(
-    raw_data: torch.Tensor, recon_args: BlackBoneStationaryArgs
-):
-    _dict = preprocess_raw_data.invoke(torch.Tensor, GoldenAngleArgs)(
-        raw_data, recon_args
-    )
-    kspace_data_centralized, kspace_data_z, kspace_traj = (
-        _dict["kspace_data_centralized"],
-        _dict["kspace_data_z"],
-        _dict["kspace_traj"],
-    )
-    csm = get_csm_lowk_xyz(
-        kspace_data_centralized,
-        kspace_traj,
-        recon_args.im_size,
-        [0.03, 0.03],
-        # recon_args.device,
-    )
-
-    return dict(
-        kspace_data_z=kspace_data_z,
-        kspace_traj=kspace_traj,
-        csm=csm,
+def preprocess_raw_data(raw_data: torch.Tensor, recon_args: BlackBoneStationaryArgs):
+    return preprocess_raw_data.invoke(torch.Tensor, GoldenAngleArgs)(
+        raw_data, recon_args, z_dim_fft=False
     )
 
 
@@ -65,21 +45,31 @@ def mcnufft_reconstruct(
     *args,
     **kwargs,
 ):
-    kspace_data_z, kspace_traj, csm = (
-        data_preprocessed["kspace_data_z"],
+    kspace_data_centralized, kspace_traj = (
+        data_preprocessed["kspace_data_centralized"],
         data_preprocessed["kspace_traj"],
-        data_preprocessed["csm"],
     )
-    kspace_data_z = comp.radial_spokes_to_kspace_point(kspace_data_z)
+    csm = get_csm_lowk_xyz(
+        kspace_data_centralized,
+        kspace_traj,
+        recon_args.im_size,
+        [0.03, 0.03],
+        # recon_args.device,
+    )
+    kspace_data_centralized = comp.radial_spokes_to_kspace_point(
+        kspace_data_centralized
+    )
     kspace_traj = comp.radial_spokes_to_kspace_point(kspace_traj)
     kspace_density_compensation = ramp_density_compensation(
         kspace_traj,
         im_size=recon_args.im_size,
     )
+    kspace_data_z = comp.ifft_1D(kspace_data_centralized, dim=1, norm="ortho")
     img_multi_ch = comp.nufft_adj_2d(
         kspace_data_z * kspace_density_compensation,
+        # kspace_data_z,
         kspace_traj,
         recon_args.im_size,
     )
     img = einx.sum("[ch] slice w h", img_multi_ch * csm.conj())
-    return img
+    return img, csm
