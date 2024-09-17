@@ -22,7 +22,7 @@ def get_raw_data(dat_file_location: Path):
 
     twixobj = read_twix(dat_file_location)[-1]
     raw_data = map_twix(twixobj)["image"]
-    raw_data.flags["remove_os"] = True
+    # raw_data.flags["remove_os"] = True # will led to warp in radial sampling
     raw_data = raw_data[:].squeeze()
     mdh = twixobj["mdb"][1].mdh
     # twixobj, mdh = mapVBVD(dat_file_location)
@@ -36,9 +36,7 @@ def get_raw_data(dat_file_location: Path):
         "par lin cha col -> cha par lin col",
         raw_data,
     )
-    shape_dict = parse_shape(
-        raw_data, "ch_num partition_num spoke_num spoke_len"
-    )
+    shape_dict = parse_shape(raw_data, "ch_num partition_num spoke_num spoke_len")
     print(shape_dict)
     return torch.from_numpy(raw_data), shape_dict, mdh, twixobj
 
@@ -212,8 +210,7 @@ def to_dicom(
     for n, header, img_slice in zip(range(img_.shape[0]), headerStackMR, img_):
         header.FrameReferenceTime = str(k)
         uid = pydicom.uid.generate_uid(
-            entropy_srcs=dicom_header["SeriesInstanceUID"]
-            + [f"contrast_{k}_slice_{n}"]
+            entropy_srcs=dicom_header["SeriesInstanceUID"] + [f"contrast_{k}_slice_{n}"]
         )
         header.SOPInstanceUID = uid
         header.file_meta.MediaStorageSOPInstanceUID = uid

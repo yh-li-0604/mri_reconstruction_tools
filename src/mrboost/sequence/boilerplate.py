@@ -11,7 +11,7 @@ class ReconArgs:
     twixobj: Any
     device: torch.device = torch.device("cuda")
     partial_fourier_flag: bool = True
-    frequency_encoding_oversampling_removed: bool = True
+    readout_oversampling_removed: bool = False
     amplitude_scale_factor: float = field(init=False)
     ch_num: int = field(init=False)
     partition_num: int = field(init=False)
@@ -66,7 +66,7 @@ class ReconArgs:
             self.FOV = self.twixobj["hdr"]["Meas"]["RoFOV"]  # type: ignore
         except KeyError:
             self.FOV = self.twixobj["hdr"]["Protocol"]["RoFOV"]
-        if self.frequency_encoding_oversampling_removed:
+        if self.readout_oversampling_removed:
             self.im_size = (self.spoke_len, self.spoke_len)
         else:
             self.im_size = (self.spoke_len // 2, self.spoke_len // 2)

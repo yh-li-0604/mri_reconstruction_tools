@@ -1,8 +1,9 @@
 # %%
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Callable, Dict, Sequence
 
 import einx
+import numpy as np
 import torch
 
 # from icecream import ic
@@ -31,7 +32,9 @@ class BlackBoneStationaryArgs(GoldenAngleArgs):
 
 
 @dispatch
-def preprocess_raw_data(raw_data: torch.Tensor, recon_args: BlackBoneStationaryArgs):
+def preprocess_raw_data(
+    raw_data: torch.Tensor, recon_args: BlackBoneStationaryArgs
+):
     return preprocess_raw_data.invoke(torch.Tensor, GoldenAngleArgs)(
         raw_data, recon_args, z_dim_fft=False
     )
@@ -41,6 +44,8 @@ def preprocess_raw_data(raw_data: torch.Tensor, recon_args: BlackBoneStationaryA
 def mcnufft_reconstruct(
     data_preprocessed: Dict[str, torch.Tensor],
     recon_args: BlackBoneStationaryArgs,
+    csm_lowk_hamming_ratio: Sequence[float] = [0.03, 0.03],
+    density_compensation_func: Callable = ramp_density_compensation,
     return_multi_channel: bool = False,
     *args,
     **kwargs,
@@ -53,23 +58,29 @@ def mcnufft_reconstruct(
         kspace_data_centralized,
         kspace_traj,
         recon_args.im_size,
-        [0.03, 0.03],
+        csm_lowk_hamming_ratio,
         # recon_args.device,
     )
-    kspace_data_centralized = comp.radial_spokes_to_kspace_point(
-        kspace_data_centralized
-    )
-    kspace_traj = comp.radial_spokes_to_kspace_point(kspace_traj)
-    kspace_density_compensation = ramp_density_compensation(
+    kspace_density_compensation = density_compensation_func(
         kspace_traj,
         im_size=recon_args.im_size,
+        normalize=False,
+        energy_match_radial_with_cartisian=True,
     )
+
+    kspace_data_centralized, kspace_traj, kspace_density_compensation = map(
+        comp.radial_spokes_to_kspace_point,
+        [kspace_data_centralized, kspace_traj, kspace_density_compensation],
+    )
+
     kspace_data_z = comp.ifft_1D(kspace_data_centralized, dim=1, norm="ortho")
     img_multi_ch = comp.nufft_adj_2d(
         kspace_data_z * kspace_density_compensation,
-        # kspace_data_z,
         kspace_traj,
         recon_args.im_size,
+        norm_factor=2 * np.sqrt(np.prod(recon_args.im_size)),
+        # 2 because of readout_oversampling
     )
+
     img = einx.sum("[ch] slice w h", img_multi_ch * csm.conj())
     return img, csm
