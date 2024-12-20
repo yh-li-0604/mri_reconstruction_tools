@@ -312,7 +312,7 @@ def normalization(img):
 def normalization_root_of_sum_of_square(d, dim=0):
     ndims = len(d.shape)
     dim_to_reduce = tuple([i for i in range(ndims) if i != dim])
-    k = torch.sqrt(torch.mean(d * d.conj(), dim=dim_to_reduce, keepdim=True))
+    k = torch.sqrt(torch.sum(d * d.conj(), dim=dim_to_reduce, keepdim=True))
     # let the average of energy in each ksample point be 1
     # print(k)
     # print((d**2).mean())
@@ -349,10 +349,10 @@ def nufft_2d(
     images: Shaped[ComplexImage2D, "*channel"],
     kspace_traj: KspaceTraj,
     image_size: Sequence[int],
-    norm_factor=None,
+    norm_factor: Number | NoneType = None,
 ) -> Shaped[KspaceData, " *channel"]:
     if norm_factor is None:
-        norm_factor = np.sqrt(np.prod(image_size) * (2 ** len(image_size)))
+        norm_factor = np.sqrt(np.prod(image_size))
     return (
         FinufftType2.apply(
             kspace_traj,
@@ -368,11 +368,8 @@ def nufft_2d(
     images: Shaped[ComplexImage2D, "..."],
     kspace_traj: Shaped[KspaceTraj, "... batch"],
     image_size: Sequence[int],
-    norm_factor=None,
+    norm_factor: Number | NoneType = None,
 ) -> Shaped[KspaceData, "..."]:
-    if norm_factor is None:
-        norm_factor = np.sqrt(np.prod(image_size) * (2 ** len(image_size)))
-
     *batch_shape, _, length = kspace_traj.shape
     batch_size = np.prod(batch_shape, dtype=int)
     kspace_traj_batched = kspace_traj.view(-1, 2, length)
@@ -412,7 +409,7 @@ def nufft_adj_2d(
     norm_factor: Number | NoneType = None,
 ) -> Shaped[ComplexImage2D, "*channel"]:
     if norm_factor is None:
-        norm_factor = np.sqrt(np.prod(image_size) * (2 ** len(image_size)))
+        norm_factor = np.sqrt(np.prod(image_size))
     return (
         FinufftType1.apply(
             kspace_traj,
@@ -431,12 +428,9 @@ def nufft_adj_2d(
     image_size: Sequence[int],
     norm_factor: Number | NoneType = None,
 ) -> Shaped[ComplexImage2D, "..."]:
-    if norm_factor is None:
-        norm_factor = np.sqrt(np.prod(image_size) * (2 ** len(image_size)))
     *batch_shape, _, length = kspace_traj.shape
     batch_size = np.prod(batch_shape, dtype=int)
 
-    # kspace_traj_batched = kspace_traj.view(-1, 2, length)
     kspace_traj_batched = einx.rearrange(
         "b... comp len -> (b...) comp len", kspace_traj
     )

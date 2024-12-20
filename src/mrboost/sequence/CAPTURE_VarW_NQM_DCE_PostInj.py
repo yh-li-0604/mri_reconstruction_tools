@@ -202,7 +202,7 @@ def mcnufft_reconstruct(
         data_preprocessed["kspace_data_csm"],
         data_preprocessed["kspace_traj_csm"],
         recon_args.im_size,
-        [0.05, 0.05],
+        csm_xy_z_lowk_ratio,
     )
     images = []
     for t in range(recon_args.contra_num):
@@ -211,7 +211,9 @@ def mcnufft_reconstruct(
             print(f"reconstructing contrast {t+1} phase {ph+1}")
             _kspace_density_compensation = density_compensation_func(
                 kspace_traj[t, ph],
-                # device=kspace_traj.device,
+                im_size=recon_args.im_size,
+                normalize=False,
+                energy_match_radial_with_cartisian=True,
             )
             _kspace_data = comp.radial_spokes_to_kspace_point(
                 kspace_data_z[t, ph] * _kspace_density_compensation
@@ -223,6 +225,7 @@ def mcnufft_reconstruct(
                 _kspace_data,
                 _kspace_traj,
                 recon_args.im_size,
+                norm_factor=2 * np.sqrt(np.prod(recon_args.im_size)),
             )
             img = einx.sum("[ch] d w h", img_multi_ch * csm.conj())
             phases.append(img.cpu())

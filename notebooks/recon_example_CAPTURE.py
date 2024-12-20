@@ -1,11 +1,9 @@
-from mrboost import reconstruction as recon
 from dlboost.utils.tensor_utils import complex_normalize_abs_95
 from mrboost.sequence.CAPTURE_VarW_NQM_DCE_PostInj import (
     CAPTURE_VarW_NQM_DCE_PostInj_Args,
     mcnufft_reconstruct,
     preprocess_raw_data,
 )
-
 
 
 def recon_one_scan_P2P(
@@ -23,9 +21,7 @@ def recon_one_scan_P2P(
     )
     data_dict_func = preprocess_raw_data(raw_data, args)
     images, csm = mcnufft_reconstruct(data_dict_func, args)
-    mean, std = complex_normalize_abs_95(
-        images, expand=False
-    )
+    mean, std = complex_normalize_abs_95(images, expand=False)
     images_normed = images / std
     return (
         data_dict_func["kspace_data_z"],
@@ -35,5 +31,3 @@ def recon_one_scan_P2P(
         mean,
         std,
     )
-
-

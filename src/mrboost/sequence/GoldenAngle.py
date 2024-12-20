@@ -51,9 +51,12 @@ def preprocess_raw_data(
         kspace_data_centralized = kspace_raw_data
         kspace_data_mask = None
     if z_dim_fft:
-        kspace_data_z = comp.batch_process(
-            batch_size=1, device=recon_args.device
-        )(comp.ifft_1D)(kspace_data_centralized, dim=1, norm="backward")
+        # kspace_data_z = comp.batch_process(
+        #     batch_size=1, device=recon_args.device
+        # )(comp.ifft_1D)(kspace_data_centralized, dim=1, norm="backward")
+        kspace_data_z = comp.ifft_1D(
+            kspace_data_centralized, dim=1, norm="ortho"
+        )
         return dict(
             kspace_data_centralized=kspace_data_centralized,
             kspace_data_z=kspace_data_z,
