@@ -19,8 +19,8 @@ class CAPTURE_VarW_NQM_DCE_PostInj_Args(GoldenAngleArgs):
     # duration_to_reconstruct: int = 1200  # in seconds
     # time_per_contrast: int = 60  # in seconds
     phase_num: int = 5
-    injection_time: int = 30
-    duration_to_reconstruct: int = 340
+    injection_time: int = 20
+    duration_to_reconstruct: int = 300
     time_per_contrast: int = 10
     percentW: float = 12.5
     contra_num: int = field(init=False)
@@ -170,6 +170,13 @@ def preprocess_raw_data(
         "kspace_traj_csm": kspace_traj[
             :, recon_args.binning_start_idx : recon_args.binning_end_idx
         ],
+        # "r": r,
+        "curves": respiratory_curve_contrast,
+        "idx": sorted_r_idx,
+        "sorted_r": sorted_r, 
+        # "Quality_metric": q,
+        # "R_total": Rm,
+        "filtered_curve": respiratory_curve,
     }
 
 
@@ -188,6 +195,8 @@ def mcnufft_reconstruct(
         data_preprocessed["kspace_data_z"],
         data_preprocessed["kspace_traj"],
     )
+    print(kspace_data_z.shape)
+    print(kspace_traj.shape)
 
     csm = get_csm_lowk_xyz(
         data_preprocessed["kspace_data_csm"],

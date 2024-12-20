@@ -10,6 +10,9 @@
 /tests
 /ToolsForRecon
 /.venv
+/bash
+/data_path
+/output
 
 **/__pycache__
 **/.pytest_cache

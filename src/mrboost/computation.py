@@ -98,7 +98,7 @@ def tuned_and_robust_estimation(
 
     # New quality metric block begin
     N = navigator.shape[1]
-    f = torch.linspace(-0.5 * Fs, 0.5 * Fs - Fs / N, steps=N, device=device)
+    f = torch.linspace(-0.5 * Fs, 0.5 * Fs - Fs / N, steps=N, device=torch.device("cuda"))
     # compute the ifft of weighted navigator, using the representation in CAPTURE paper
     # col_num->x, line_num->n, ch_num->i, tuning_num->m
     K_weighted = torch.from_numpy(W * navigator).to(f.device)
@@ -154,6 +154,7 @@ def tuned_and_robust_estimation(
     r_max_filtered[0:10], r_max_filtered[-10:] = r_max_SG[0:10], r_max_SG[-10:]
 
     return i_max, m_max, torch.from_numpy(r_max_filtered)
+
 
 
 def centralize_kspace(
