@@ -59,19 +59,19 @@ class CAPTURE_VarW_NQM_DCE_PostInj_Args(GoldenAngleArgs):
         self.spokes_per_contra = int(
             nSpokesPerContrast - np.mod(nSpokesPerContrast, self.phase_num)
         )
-        self.contra_num = int(
-            np.floor(nSpokesToWorkWith / self.spokes_per_contra)
-        )
+        self.contra_num = 5
         self.spokes_per_phase = int(nSpokesPerContrast / self.phase_num)
 
-        self.binning_start_idx = (
-            self.spokes_to_skip - self.start_spokes_to_discard
-        )
-        self.binning_end_idx = (
-            self.spokes_to_skip
-            - self.start_spokes_to_discard
-            + self.contra_num * self.spokes_per_contra
-        )
+        # self.binning_start_idx = (
+        #     self.spokes_to_skip - self.start_spokes_to_discard
+        # )
+        self.binning_start_idx = 10
+        self.binning_end_idx = 2210
+        # self.binning_end_idx = (
+        #     self.spokes_to_skip
+        #     - self.start_spokes_to_discard
+        #     + self.contra_num * self.spokes_per_contra
+        # ) + 30
 
 
 @dispatch

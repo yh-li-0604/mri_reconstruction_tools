@@ -12,7 +12,9 @@ import torch
 from numbers import Number
 from types import NoneType
 from typing import Sequence
-
+from mrboost.sequence.CAPTURE_VarW_NQM_DCE_PostInj import (
+    mcnufft_reconstruct,
+)
 import einx
 
 # import numpy as np
@@ -56,7 +58,7 @@ import torch
 from plum import dispatch
 from mrboost.coil_sensitivity_estimation import get_csm_lowk_xyz
 from mrboost.density_compensation import ramp_density_compensation
-from visualization import process_and_plot, csm_check, create_animation
+# from visualization import process_and_plot, csm_check, create_animation, create_animation_by_phase
 
 
 def median_filter_1d(R, kernel_size=5):
@@ -344,7 +346,7 @@ def tuned_and_robust_estimation_cardiac(
     # determinator = torch.maximum(r_range, lower_bound)
     # Q = lowfreq_integral / highfreq_integral / determinator
     # Q_np = Q.numpy(force=True)  # faster than matlab version 10x
-    Q, mu_f = quality(R, r, f, args)
+    Q, mu_f = quality(R, r, f, FOV, ndata)
     sigma = 0.156
     Q_np = Q.numpy(force=True)
     
@@ -420,11 +422,12 @@ def bin_data_to_phases(
     data,
     ph_idx,
     cardiac_phase_num,
-    # respiratory_phase_num,
+    respiratory_phase_num,
 ):
     *leading_dims, spoke_num, spoke_len = data.shape
-    binned_data_list = [None for _ in range(cardiac_phase_num)]
-    for phase_idx in range(cardiac_phase_num):
+    total_phases = cardiac_phase_num * respiratory_phase_num
+    binned_data_list = [None] * total_phases
+    for phase_idx in range(total_phases):
         # Mask to select the spokes for this phase
         mask = ph_idx == phase_idx
         # Select the spokes corresponding to this phase
@@ -435,15 +438,18 @@ def bin_data_to_phases(
     spokes_per_bin = binned_data_list[0].shape[-2]
     
     binned_data = torch.zeros(
-        (cardiac_phase_num, *leading_dims, spokes_per_bin, spoke_len),
+        (respiratory_phase_num, cardiac_phase_num, *leading_dims, spokes_per_bin, spoke_len),
         dtype=data.dtype,
         device=data.device,
     )
     
-    for cardiac_idx in range(cardiac_phase_num):
-        spokes = binned_data_list[cardiac_idx]
-        num_spokes = spokes.shape[-2]
-        binned_data[cardiac_idx, ..., :num_spokes, :] = spokes
+    for phase_idx in range(total_phases):
+        resp_phase = phase_idx // cardiac_phase_num
+        card_phase = phase_idx % cardiac_phase_num
+        spokes = binned_data_list[phase_idx]
+        if spokes is not None:
+            num_spokes = spokes.shape[-2]
+            binned_data[resp_phase, card_phase, ..., :num_spokes, :] = spokes
         
     return binned_data
     
@@ -506,8 +512,8 @@ def preprocess_raw_data(
     kspace_data_z = comp.ifft_1D(kspace_data_centralized, dim=1, norm="ortho")
     
     spoke_count = recon_args.binning_end_idx - recon_args.binning_start_idx
-    cardiac_phase_num = 5
-    respiratory_phase_num = 7
+    cardiac_phase_num = recon_args.phase_num
+    respiratory_phase_num = 5
 
     # _, cardiac_sorted_idx = torch.sort(cardiac_curve)  
     _, respiratory_sorted_idx = torch.sort(respiratory_curve)  
@@ -548,8 +554,8 @@ def preprocess_raw_data(
             ],
         ],
         [combined_phase_indices] * 4,
-        [respiratory_phase_num * cardiac_phase_num] * 4,
-        # [respiratory_phase_num] * 4,
+        [cardiac_phase_num] * 4,
+        [respiratory_phase_num] * 4,
     )
 
 
@@ -578,7 +584,7 @@ def preprocess_raw_data(
     }
 
 
-def quality(R, r, f, args):
+def quality(R, r, f, FOV, ndata):
     R = torch.tensor(R)
     # R = normalize_f(R)
     R_filtered = median_filter_1d(R, kernel_size=3)
@@ -602,8 +608,8 @@ def quality(R, r, f, args):
     lowfreq_integral = reduce(low_signal, "f i m -> i m", "sum")
     highfreq_integral = reduce(high_signal, "f i m -> i m", "sum")
 
-    FOV = args.FOV
-    ndata = args.spoke_len
+    # FOV = args.FOV
+    # ndata = args.spoke_len
     r_range = torch.tensor(reduce(r, "n i m -> i m", "max") - reduce(
         r, "n i m -> i m", "min"
         ))
@@ -611,6 +617,7 @@ def quality(R, r, f, args):
 
     determinator = torch.maximum(r_range, lower_bound)
     Q = score * lowfreq_integral / highfreq_integral / torch.sqrt(determinator)
+    # Q = score * lowfreq_integral / highfreq_integral
     
     # print(torch.max(lowfreq_integral), torch.max(highfreq_integral))
     return Q,  mu
@@ -706,74 +713,74 @@ def peak_detection(R, f, low_freq_range=(0.5, 2.0)):
     return mu, score
 
 
-@dispatch
-def mcnufft_reconstruct(
-    data_preprocessed: Dict[str, torch.Tensor],
-    recon_args: CAPTURE_VarW_NQM_DCE_PostInj_Args,
-    return_multi_channel: bool = False,
-    density_compensation_func: Callable = ramp_density_compensation,
-    csm_xy_z_lowk_ratio=[0.05, 0.05],
-    *args,
-    **kwargs,
-):
-    # Extract preprocessed k-space data, trajectories, and masks
-    kspace_data_centralized, kspace_data_z, kspace_traj, kspace_mask = (
-        data_preprocessed["kspace_data_centralized"],
-        data_preprocessed["kspace_data_z"],
-        data_preprocessed["kspace_traj"],
-        data_preprocessed["kspace_data_mask"], 
-    )
+# @dispatch
+# def mcnufft_reconstruct(
+#     data_preprocessed: Dict[str, torch.Tensor],
+#     recon_args: CAPTURE_VarW_NQM_DCE_PostInj_Args,
+#     return_multi_channel: bool = False,
+#     density_compensation_func: Callable = ramp_density_compensation,
+#     csm_xy_z_lowk_ratio=[0.05, 0.05],
+#     *args,
+#     **kwargs,
+# ):
+#     # Extract preprocessed k-space data, trajectories, and masks
+#     kspace_data_centralized, kspace_data_z, kspace_traj, kspace_mask = (
+#         data_preprocessed["kspace_data_centralized"],
+#         data_preprocessed["kspace_data_z"],
+#         data_preprocessed["kspace_traj"],
+#         data_preprocessed["kspace_data_mask"], 
+#     )
     
-    print(kspace_data_z.shape)
-    print(kspace_traj.shape)
+#     print(kspace_data_z.shape)
+#     print(kspace_traj.shape)
 
-    # Compute coil sensitivity maps (CSMs)
-    csm = get_csm_lowk_xyz(
-        data_preprocessed["kspace_data_csm"],
-        data_preprocessed["kspace_traj_csm"],
-        recon_args.im_size,
-        csm_xy_z_lowk_ratio,
-    )
+#     # Compute coil sensitivity maps (CSMs)
+#     csm = get_csm_lowk_xyz(
+#         data_preprocessed["kspace_data_csm"],
+#         data_preprocessed["kspace_traj_csm"],
+#         recon_args.im_size,
+#         csm_xy_z_lowk_ratio,
+#     )
 
-    # Initialize list to store reconstructed images
-    images = []
+#     # Initialize list to store reconstructed images
+#     images = []
 
-    # Iterate over cardiac and respiratory phases
-    cardiac_phase_num = 35
-    respiratory_phase_num = 5
-    phases = []
-    for ph in range(cardiac_phase_num):
+#     # Iterate over cardiac and respiratory phases
+#     cardiac_phase_num = 35
+#     respiratory_phase_num = 5
+#     phases = []
+#     for ph in range(cardiac_phase_num):
 
-        print(f"reconstructing  phase {ph+1}")
-        _kspace_density_compensation = density_compensation_func(
-            kspace_traj[ph],
-            energy_match_radial_with_cartisian=True
-            # device=kspace_traj.device,
-        )
-        _kspace_data = comp.radial_spokes_to_kspace_point(
-            kspace_data_z[ph] * _kspace_density_compensation
-        )
-        _kspace_traj = comp.radial_spokes_to_kspace_point(
-            kspace_traj[ph]
-        )
-        img_multi_ch = comp.nufft_adj_2d(
-            _kspace_data,
-            _kspace_traj,
-            recon_args.im_size,
-        )
-        img = einx.sum("[ch] d w h", img_multi_ch * csm.conj())
-        phases.append(img.cpu())
-        # images.append(torch.stack(phases, dim=0))       
+#         print(f"reconstructing  phase {ph+1}")
+#         _kspace_density_compensation = density_compensation_func(
+#             kspace_traj[ph],
+#             energy_match_radial_with_cartisian=True
+#             # device=kspace_traj.device,
+#         )
+#         _kspace_data = comp.radial_spokes_to_kspace_point(
+#             kspace_data_z[ph] * _kspace_density_compensation
+#         )
+#         _kspace_traj = comp.radial_spokes_to_kspace_point(
+#             kspace_traj[ph]
+#         )
+#         img_multi_ch = comp.nufft_adj_2d(
+#             _kspace_data,
+#             _kspace_traj,
+#             recon_args.im_size,
+#         )
+#         img = einx.sum("[ch] d w h", img_multi_ch * csm.conj())
+#         phases.append(img.cpu())
+#         # images.append(torch.stack(phases, dim=0))       
         
-    # Stack cardiac phases
-    return torch.stack(phases, dim=0), csm
+#     # Stack cardiac phases
+#     return torch.stack(phases, dim=0), csm
 
 
 
 
 if __name__=="__main__":
     list_file_path = "/data/anlab/Yunhe/mri_reconstruction_tools/data_path/cardiac_file.list"
-    output_path = "/data/anlab/Yunhe/mri_reconstruction_tools/output/03"
+    output_path = "/data/anlab/Yunhe/mri_reconstruction_tools/output/03.3"
 
     # Open the list file and iterate through each line
     with open(list_file_path, 'r') as file:
@@ -795,7 +802,7 @@ if __name__=="__main__":
                     mdh,
                     twixobj,
                     phase_num=5, # 10
-                    time_per_contrast=10, # 20
+                    time_per_contrast=88, # 20
                     # frequency_encoding_oversampling_removed=True,
                     device=torch.device("cuda:0"),
                 )
@@ -805,13 +812,13 @@ if __name__=="__main__":
                 rotation_angle = data_dict_func["m"]
                 print(coil_num, rotation_angle)
                 
-                process_and_plot(data_dict_func, args, coil_num, rotation_angle, output)
-                csm_check(
-                    data_dict_func,
-                    raw_data,
-                    args,
-                    output,
-                )
+                # process_and_plot(data_dict_func, args, coil_num, rotation_angle, output)
+                # csm_check(
+                #     data_dict_func,
+                #     raw_data,
+                #     args,
+                #     output,
+                # )
                 
                 image, csm = mcnufft_reconstruct(data_dict_func, args)
                 # mean, std = complex_normalize_abs_95(
@@ -819,19 +826,36 @@ if __name__=="__main__":
                 # )
                 # images_normed = image / std
                 image = image.numpy(force=True)
+                print(image.shape)
                 
-                for id in range(3):
-                    slice = ["sagittal", "coronal", "transverse"]
-                    idx = [29, 177, 163]
-                    for i in range(3):
-                        create_animation(
-                            image, 
-                            id, 
-                            output, 
-                            slice[i],
-                            idx[i]
-                        )
-                    plt.close("all")
+                # for id in range(3):
+                #     slice = ["sagittal", "coronal", "transverse"]
+                #     idx = [29, 177, 163]
+                #     for i in range(3):
+                #         # create_animation(
+                #         #     image, 
+                #         #     id, 
+                #         #     output, 
+                #         #     slice[i],
+                #         #     idx[i]
+                #         # )
+                #         create_animation_by_phase(
+                #             image, 
+                #             id, 
+                #             output, 
+                #             slice[i],
+                #             idx[i]
+                #         )
+                #         create_animation_by_phase(
+                #             image, 
+                #             id, 
+                #             output, 
+                #             slice[i],
+                #             idx[i],
+                #             phases=35
+                #         )
+                        
+                #     plt.close("all")
                 
             
             

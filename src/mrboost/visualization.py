@@ -322,5 +322,74 @@ def create_animation(image, id, save_path, slice, slice_index):
     plt.show()
     ani.save(f'{save_path}/{slice}_slices_animation_{slice_index}.mp4', writer='ffmpeg', fps=5)
     
+def create_animation_by_phase(image, id, save_path, slice, slice_index, phases=5):
+    # phases should equal to the cardiac phase number 
+    combined_data = np.stack(image, axis=0)
+    combined_data = np.transpose(combined_data, (1, 2, 3, 0))
+    combined_data = np.abs(combined_data)
+
+    total_frames = combined_data.shape[-1]
+    frames_per_phase = phases
+    num_phases = total_frames // frames_per_phase
+
+    # type_ = ["respiratory", "cardiac", "combined"][id]
+
+    for p in range(num_phases):
+        start = p * frames_per_phase
+        end = (p + 1) * frames_per_phase
+        sub_frames = combined_data[..., start:end]
+        
+        if phases != 35:
+            phase_save_path = os.path.join(save_path, f"respiratory_phase_{p}'s cardiac phase")
+        else:
+            phase_save_path = os.path.join(save_path, f"combined_phase_{p}")
+            
+        os.makedirs(phase_save_path, exist_ok=True)
+
+        save_phase_animation(sub_frames, id, phase_save_path, slice, slice_index, p)
+    
+    
+def save_phase_animation(combined_data, id, save_path, slice, slice_index, p):
+        vmin = 95.20
+        vmax = 83111.20
+        t = False
+
+        match slice:
+            case "coronal":
+                shape = combined_data[:, :, slice_index, :].shape
+                combined_slice = np.zeros((shape[1], shape[0], shape[2]))
+                slice_img = np.fliplr(combined_data[:, :, slice_index, 0].T)
+                for i in range(combined_data.shape[-1]):
+                    combined_slice[:, :, i] = np.fliplr(combined_data[:, :, slice_index, i].T)
+                aspect = 1.125/3
+            case "sagittal":
+                slice_img = combined_data[slice_index, :, :, 0]
+                combined_slice = combined_data[slice_index, :, :, :]
+                aspect = 1.125/1.125
+            case "transverse":
+                t = True
+                slice_img = combined_data[:, slice_index, :, 0].T
+                combined_slice = combined_data[:, slice_index, :, :]
+                aspect = 1.125/3
+            case _:
+                raise ValueError(f"Invalid slice type: {slice}")
+
+        fig, ax = plt.subplots()
+        img = ax.imshow(slice_img, cmap='gray', animated=True, aspect=aspect, vmin=vmin, vmax=vmax)
+        ax.set_title(f"{slice} Animation")
+        ax.axis('off')
+
+        def update(frame):
+            if t:
+                video_frame = combined_slice[:, :, frame].T
+            else:
+                video_frame = combined_slice[:, :, frame]
+            img.set_array(video_frame)
+            return img,
+
+        ani = FuncAnimation(fig, update, frames=combined_slice.shape[-1], interval=500, blit=True)
+        plt.show()
+        ani.save(f'{save_path}/{slice}_slices_animation_{slice_index}_{p}.mp4', writer='ffmpeg', fps=5)
+    
 # Example usage:
 # process_and_plot(data_dict_func, args, coil_num, angle, "/path/to/output")
